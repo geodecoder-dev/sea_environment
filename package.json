@@ -7,9 +7,9 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "tsx server.ts",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "start": "tsx server.ts --prod",
+    "lint": "tsc --noEmit",
+    "db:reset": "node scripts/reset-db.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

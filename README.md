@@ -76,28 +76,66 @@ SESSION_SECRET="solaris_reef_secure_session_token_key_change_in_production"
 
 ---
 
-## 4. Installation & Local Development
+---
 
-1. **Install Dependencies**:
-   ```bash
-   npm install
-   ```
+## 4. Git Clone & Setup Workflow
 
-2. **Start Full-Stack Server** (Express + Vite middlewares):
-   ```bash
-   npm run dev
-   ```
-   Open `http://localhost:3000` in your browser.
+When cloning or pulling this repository to another machine:
 
-3. **Build for Production**:
-   ```bash
-   npm run build
-   npm start
-   ```
+### First-Time Clone:
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-org/solaris-reef-hub.git
+cd solaris-reef-hub
+
+# 2. Copy the environment configuration template
+cp .env.example .env
+
+# 3. Install dependencies
+npm install
+
+# 4. Run development server (Hot Module Reloading + Express backend on port 3000)
+npm run dev
+```
+
+### Git Pull Workflow (Seamless & Conflict-Free):
+- **Database Isolation:** Runtime database files (`data/*.json`, `data/*.tmp`) are explicitly ignored in `.gitignore`.
+- When you execute `git pull`, local transaction records, new test donations, or admin edits are **never overwritten or conflicted**.
+- If a clean seed is ever desired, run:
+  ```bash
+  npm run db:reset
+  ```
 
 ---
 
-## 5. Testing the Billplz Flow (Interactive Sandbox)
+## 5. Production Build & Docker Deployment
+
+### Local Production Test:
+```bash
+# Compile optimized React SPA
+npm run build
+
+# Start production server
+npm start
+```
+
+### Docker Deployment:
+A multi-stage, secure `Dockerfile` is included:
+
+```bash
+# Build the Docker image
+docker build -t solaris-reef-hub .
+
+# Run the container on port 3000
+docker run -d -p 3000:3000 --name solaris-reef solaris-reef-hub
+
+# Verify server health
+curl http://localhost:3000/api/health
+```
+
+---
+
+## 6. Testing the Billplz Flow (Interactive Sandbox)
 
 1. On the homepage, select **RM 50** and click **Continue to Payment**.
 2. In the interactive Sandbox portal, select any Malaysian FPX bank (e.g. *Maybank2u*, *CIMB Clicks*) and click **Simulate Successful FPX Payment**.
@@ -107,9 +145,10 @@ SESSION_SECRET="solaris_reef_secure_session_token_key_change_in_production"
 
 ---
 
-## 6. Items Requiring Production Activation
+## 7. Items Requiring Production Activation
 
 When deploying live for the Leo-Lion Club of KL Solaris:
 - **Billplz Production Credentials**: Create a production collection on [Billplz](https://www.billplz.com), retrieve the Production Secret Key, Collection ID, and X-Signature Key, and set `BILLPLZ_SANDBOX=false`.
 - **Custom Domain & HTTPS**: Configure your custom domain in `APP_URL` so Billplz webhooks resolve over HTTPS.
 - **Admin Password**: Update `ADMIN_PASSWORD` and `SESSION_SECRET` to production secrets.
+

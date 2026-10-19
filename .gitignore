@@ -6,3 +6,15 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Runtime persistence (prevents merge conflicts on git pull)
+data/*.json
+data/*.tmp
+data/*.bak
+!data/.gitkeep
+
+# IDE & OS caches
+.vscode/
+.idea/
+Thumbs.db
+

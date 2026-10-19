@@ -17,17 +17,40 @@ import {
   AuthenticatedRequest,
 } from './server/auth.js';
 
+import fs from 'fs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
-const isProd = process.env.NODE_ENV === 'production';
+const isProd =
+  process.env.NODE_ENV === 'production' ||
+  process.argv.includes('--prod') ||
+  process.argv.includes('--production');
 
 // Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Health Check Endpoint (useful for Docker, CI/CD, and post-clone testing)
+app.get('/api/health', (_req, res) => {
+  try {
+    const status = billplz.getStatus();
+    res.json({
+      status: 'ok',
+      uptime: Math.round(process.uptime()),
+      timestamp: new Date().toISOString(),
+      nodeVersion: process.version,
+      mode: isProd ? 'production' : 'development',
+      database: 'connected',
+      billplz: status.mode,
+    });
+  } catch (err: any) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
+});
 
 // App URL helper for callback and redirect URLs
 function getAppUrl(req: express.Request): string {
@@ -629,15 +652,44 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    const distPath = path.resolve(__dirname, 'dist');
+    const indexPath = path.join(distPath, 'index.html');
+
+    if (!fs.existsSync(indexPath)) {
+      console.warn('⚠️  Production mode active but dist/index.html not found!');
+      console.warn('   Run "npm run build" to generate client assets before running in production.');
+    }
+
+    app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(503).send('Application build in progress. Please run "npm run build".');
+      }
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Solaris Reef hub running at http://localhost:${PORT}`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🌿 Solaris Reef hub running at http://localhost:${PORT} (${isProd ? 'production' : 'development'})`);
   });
+
+  // Graceful shutdown for Docker, PM2, Kubernetes, and SIGINT/SIGTERM
+  const handleShutdown = (signal: string) => {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    server.close(() => {
+      console.log('HTTP server closed.');
+      process.exit(0);
+    });
+    // Force exit if hanging
+    setTimeout(() => {
+      console.error('Could not close connections in time, forcefully shutting down');
+      process.exit(1);
+    }, 5000);
+  };
+
+  process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => handleShutdown('SIGINT'));
 }
 
 startServer();
