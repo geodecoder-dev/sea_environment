@@ -1,11 +1,115 @@
-<div align="center">
+# Solaris Reef — Coral Restoration Campaign Hub
+### Leo-Lion Club of KL Solaris (Non-Governmental Organisation)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A modern, interactive, responsive web application built for the **Leo-Lion Club of KL Solaris** to rally community support and fundraise for the **Solaris Reef Coral Restoration & Marine Nursery** flagship initiative in Malaysian waters (Pulau Tioman Marine Park Sanctuary).
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 1. Visual & Architectural Design
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+- **Digital Scrapbook & Curatorial Editorial Aesthetics:**
+  - Nature-inspired palette: Warm Off-White (`#FFFDF7`), Sand Beige (`#F4E9D8`), Deep Ocean Navy (`#123047`), Ocean Blue (`#247BA0`), Coral Pink (`#FF7F6A`), Seafoam Green (`#B8E0D2`), and Seaweed Green (`#426B50`).
+  - Organic shapes, polaroid-style photography, washi tape accents, and campaign stamps ("Every Fragment Matters", "Protect Our Reefs").
+  - High-contrast typography pairing: **Fraunces** (expressive editorial display serif) and **Plus Jakarta Sans** (humanist body sans-serif), with tabular figures for numbers.
+  - Zero-pill metadata discipline and strict adherence to anti-slop guidelines.
 
-</div>
+- **3-Page Architecture:**
+  1. `/` — **Public Campaign Homepage**:
+     - 3-zone top navigation bar.
+     - Striking editorial collage hero with verified metrics.
+     - Campaign overview: Why coral reefs matter, the environmental challenge, micro-propagation science, and community divers.
+     - Live progress dashboard with dynamic statistics and milestone roadmap.
+     - Interactive donation form with presets (RM10, RM25, RM50, RM100) and custom amount, live impact calculation, and Billplz gateway checkout.
+     - Field updates feed with category filtering and photography highlights.
+     - Transparent NGO footer with contact details and environmental pledge.
+  2. `/admin` — **Operations Dashboard (Protected)**:
+     - PBKDF2 hashed administrator authentication and secure session tokens.
+     - Live overview metrics and audit trail.
+     - Campaign settings: Update title, description, targets, and milestones.
+     - Field updates management: Create, edit, publish, and delete updates.
+     - Donations ledger: Search, filter by status, and export to CSV.
+     - Billplz Gateway Diagnostics & Webhook Simulator: Test live callbacks, duplicate callback idempotency, and cryptographic signature rejection.
+  3. `/donation/result` — **Payment Outcome & Receipt**:
+     - Server-verified transaction verification via `/api/donations/verify/:reference`.
+     - Handles Paid, Pending, Cancelled, and Failed states without trusting client-side claims.
+     - Receipt print and share options.
+
+---
+
+## 2. Billplz Payment Gateway Integration
+
+The application integrates with the official **Billplz API v3** for Malaysian Ringgit (MYR) donations:
+
+### Payment Lifecycle:
+1. **Initiation**: Donor submits contribution on the homepage (`POST /api/donations/checkout`).
+2. **Server-Side Validation**: Backend validates donation (minimum RM 5.00), calculates sen integer amount, generates a unique internal reference (e.g. `SOL-202610-A9F4`), and creates a pending donation in the database.
+3. **Bill Creation**: Backend connects to `https://www.billplz-sandbox.com/api/v3/bills` (or production) with basic auth. If keys are in local sandbox mode, the smart adapter serves an interactive checkout simulation.
+4. **Webhook Callback**: Billplz sends a POST request to `/api/webhooks/billplz`.
+5. **Cryptographic Verification**: The backend sorts payload keys alphabetically (excluding `x_signature`), joins with `|`, and computes HMAC-SHA256 with the `BILLPLZ_X_SIGNATURE_KEY`.
+6. **Idempotent Update**: Donation status updates to `paid` (or `cancelled`/`failed`). Repeated or duplicate webhooks are acknowledged without inflating totals.
+7. **Verified Campaign Total**: Only confirmed `paid` transactions contribute to the fundraising tally.
+
+---
+
+## 3. Environment Variables Configuration
+
+Copy `.env.example` to `.env`:
+
+```bash
+# Gemini API (Server side)
+GEMINI_API_KEY="your_api_key_here"
+
+# Application URL (for callback and redirect links)
+APP_URL="http://localhost:3000"
+
+# Billplz Gateway Configuration
+BILLPLZ_SANDBOX="true"
+BILLPLZ_API_KEY="your_billplz_api_key_here"
+BILLPLZ_COLLECTION_ID="your_billplz_collection_id_here"
+BILLPLZ_X_SIGNATURE_KEY="your_billplz_x_signature_key_here"
+
+# Admin Authentication
+ADMIN_EMAIL="admin@leolion-solaris.org"
+ADMIN_PASSWORD="SolarisReef2026!"
+SESSION_SECRET="solaris_reef_secure_session_token_key_change_in_production"
+```
+
+---
+
+## 4. Installation & Local Development
+
+1. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
+
+2. **Start Full-Stack Server** (Express + Vite middlewares):
+   ```bash
+   npm run dev
+   ```
+   Open `http://localhost:3000` in your browser.
+
+3. **Build for Production**:
+   ```bash
+   npm run build
+   npm start
+   ```
+
+---
+
+## 5. Testing the Billplz Flow (Interactive Sandbox)
+
+1. On the homepage, select **RM 50** and click **Continue to Payment**.
+2. In the interactive Sandbox portal, select any Malaysian FPX bank (e.g. *Maybank2u*, *CIMB Clicks*) and click **Simulate Successful FPX Payment**.
+3. The server computes the authentic HMAC-SHA256 X-Signature, updates the database idempotently, and redirects to `/donation/result?ref=SOL-XXXXXX`.
+4. The result page queries the server and displays the verified receipt.
+5. Log into `/admin` (using `admin@leolion-solaris.org` / `SolarisReef2026!`) to observe the new donation in the ledger, download the CSV report, or test webhook edge cases in the Billplz Diagnostics tab.
+
+---
+
+## 6. Items Requiring Production Activation
+
+When deploying live for the Leo-Lion Club of KL Solaris:
+- **Billplz Production Credentials**: Create a production collection on [Billplz](https://www.billplz.com), retrieve the Production Secret Key, Collection ID, and X-Signature Key, and set `BILLPLZ_SANDBOX=false`.
+- **Custom Domain & HTTPS**: Configure your custom domain in `APP_URL` so Billplz webhooks resolve over HTTPS.
+- **Admin Password**: Update `ADMIN_PASSWORD` and `SESSION_SECRET` to production secrets.

@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Fraunces", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --color-ocean: #247BA0;
+  --color-ocean-dark: #123047;
+  --color-coral: #FF7F6A;
+  --color-coral-dark: #E66652;
+  --color-seafoam: #B8E0D2;
+  --color-seafoam-light: #E8F5F1;
+  --color-sand: #F4E9D8;
+  --color-sand-light: #FFFDF7;
+  --color-seaweed: #426B50;
+  --color-seaweed-light: #EBF2ED;
+}
+
+/* Base custom styles & tactile scrapbook textures */
+html {
+  scroll-behavior: smooth;
+  font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Paper / scrapbook stickers and washi tape aesthetics */
+.tape-strip {
+  background: rgba(244, 233, 216, 0.75);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(1px);
+}
+
+.scrapbook-border {
+  border: 1.5px solid rgba(18, 48, 71, 0.15);
+}
+
+.scrapbook-pin {
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.6), 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* Subtle organic paper texture effect */
+.bg-paper-grain {
+  background-color: #FFFDF7;
+  background-image: radial-gradient(rgba(18, 48, 71, 0.04) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
