@@ -16,9 +16,13 @@ import {
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'database.json');
 
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// Ensure data directory exists if filesystem is accessible (Node.js/local dev)
+try {
+  if (typeof fs !== 'undefined' && typeof fs.existsSync === 'function' && !fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch {
+  // Running in Cloudflare Workers / Edge runtime where fs is not writable
 }
 
 function hashPasswordWithSalt(password: string, salt: string): string {
@@ -298,12 +302,12 @@ class Database {
 
   private loadData(): DatabaseSchema {
     try {
-      if (fs.existsSync(DB_PATH)) {
+      if (typeof fs !== 'undefined' && typeof fs.existsSync === 'function' && fs.existsSync(DB_PATH)) {
         const fileContent = fs.readFileSync(DB_PATH, 'utf-8');
         return JSON.parse(fileContent);
       }
     } catch (err) {
-      console.error('Error loading database.json, resetting to seed:', err);
+      // In-memory fallback
     }
     const seed = createDefaultSeed();
     this.saveData(seed);
@@ -313,11 +317,13 @@ class Database {
   private saveData(dataToSave?: DatabaseSchema) {
     const payload = dataToSave || this.data;
     try {
-      const tempPath = `${DB_PATH}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), 'utf-8');
-      fs.renameSync(tempPath, DB_PATH);
-    } catch (err) {
-      console.error('Failed to persist database.json:', err);
+      if (typeof fs !== 'undefined' && typeof fs.writeFileSync === 'function') {
+        const tempPath = `${DB_PATH}.tmp`;
+        fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), 'utf-8');
+        fs.renameSync(tempPath, DB_PATH);
+      }
+    } catch {
+      // Edge runtime / read-only filesystem (Cloudflare Workers)
     }
   }
 

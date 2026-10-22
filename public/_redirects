@@ -1,0 +1,6 @@
+# Cloudflare Pages Routing Rules
+# API routes handled by /functions
+/api/*      /api/:splat   200
+
+# Single Page App Client-Side Routing Fallback
+/*          /index.html   200

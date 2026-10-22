@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "start": "tsx server.ts --prod",
     "lint": "tsc --noEmit",
-    "db:reset": "node scripts/reset-db.js"
+    "db:reset": "node scripts/reset-db.js",
+    "pages:build": "vite build",
+    "pages:dev": "npx wrangler pages dev dist --compatibility-flag=nodejs_compat",
+    "pages:deploy": "npx wrangler pages deploy dist",
+    "d1:init": "npx wrangler d1 execute solaris-reef-db --file=./schema.sql"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -25,6 +29,7 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261022.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",

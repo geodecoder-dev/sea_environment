@@ -108,34 +108,78 @@ npm run dev
 
 ---
 
-## 5. Production Build & Docker Deployment
+---
 
-### Local Production Test:
+## 5. Cloudflare Pages & Workers Deployment
+
+The project is structured to deploy natively to **Cloudflare Pages with Cloudflare Functions (Workers)**:
+
+### Architecture:
+- **Frontend SPA (Cloudflare Pages):** Static build located in `/dist`, with `/public/_redirects` and `/public/_routes.json` ensuring seamless SPA client-side routing.
+- **Backend API (Cloudflare Pages Functions):** Edge functions located in `/functions` (`/functions/api/[[route]].ts`), which Cloudflare Pages automatically discovers and runs as Cloudflare Workers.
+- **Universal Shared Logic:** Both local dev (`server.ts`) and edge functions (`/functions/api/[[route]].ts`) share `/server/api-router.ts`, guaranteeing 100% feature parity.
+- **Wrangler Configuration:** `wrangler.toml` pre-configured with `pages_build_output_dir = "dist"` and `nodejs_compat`.
+
+### Deploying via Cloudflare Dashboard (GitHub Integration):
+1. Push the repository to GitHub.
+2. In the **Cloudflare Dashboard**, navigate to **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**.
+3. Select the repository and configure the build settings:
+   - **Framework preset:** `None` (or `Vite`)
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+   - **Root directory:** `/`
+4. Under **Environment variables**, add:
+   - `BILLPLZ_SANDBOX`: `true` (or `false` for live production)
+   - `BILLPLZ_API_KEY`: Your Billplz secret key
+   - `BILLPLZ_COLLECTION_ID`: Your Billplz collection ID
+   - `BILLPLZ_X_SIGNATURE_KEY`: Your Billplz X-Signature key
+   - `ADMIN_EMAIL`: `admin@leolion-solaris.org`
+   - `ADMIN_PASSWORD`: Your chosen admin password
+   - `SESSION_SECRET`: Random 32+ character secret string
+5. Click **Save and Deploy**. Cloudflare Pages will build the frontend and deploy the `/functions` API routes across its global edge network.
+
+### Deploying via Wrangler CLI:
 ```bash
-# Compile optimized React SPA
-npm run build
+# Build frontend assets
+npm run pages:build
 
-# Start production server
-npm start
+# Deploy directly with Wrangler
+npm run pages:deploy
+```
+
+### Optional: Cloudflare D1 Relational Database Setup:
+If using Cloudflare's serverless D1 SQL database:
+```bash
+# 1. Create D1 database
+npx wrangler d1 create solaris-reef-db
+
+# 2. Add the generated database_id into wrangler.toml under [[d1_databases]]
+
+# 3. Apply schema and initial seeds
+npm run d1:init
+```
+
+---
+
+## 6. Local Development & Docker Deployment
+
+### Local Development (AI Studio / Node.js):
+```bash
+# Start full-stack development server on port 3000
+npm run dev
 ```
 
 ### Docker Deployment:
 A multi-stage, secure `Dockerfile` is included:
-
 ```bash
-# Build the Docker image
 docker build -t solaris-reef-hub .
-
-# Run the container on port 3000
 docker run -d -p 3000:3000 --name solaris-reef solaris-reef-hub
-
-# Verify server health
 curl http://localhost:3000/api/health
 ```
 
 ---
 
-## 6. Testing the Billplz Flow (Interactive Sandbox)
+## 7. Testing the Billplz Flow (Interactive Sandbox)
 
 1. On the homepage, select **RM 50** and click **Continue to Payment**.
 2. In the interactive Sandbox portal, select any Malaysian FPX bank (e.g. *Maybank2u*, *CIMB Clicks*) and click **Simulate Successful FPX Payment**.
@@ -145,10 +189,11 @@ curl http://localhost:3000/api/health
 
 ---
 
-## 7. Items Requiring Production Activation
+## 8. Items Requiring Production Activation
 
 When deploying live for the Leo-Lion Club of KL Solaris:
 - **Billplz Production Credentials**: Create a production collection on [Billplz](https://www.billplz.com), retrieve the Production Secret Key, Collection ID, and X-Signature Key, and set `BILLPLZ_SANDBOX=false`.
 - **Custom Domain & HTTPS**: Configure your custom domain in `APP_URL` so Billplz webhooks resolve over HTTPS.
 - **Admin Password**: Update `ADMIN_PASSWORD` and `SESSION_SECRET` to production secrets.
+
 

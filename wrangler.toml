@@ -1,0 +1,23 @@
+# Cloudflare Pages & Workers Configuration
+name = "solaris-reef-hub"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+BILLPLZ_SANDBOX = "true"
+ADMIN_EMAIL = "admin@leolion-solaris.org"
+
+# Cloudflare D1 Database Binding (Optional production persistent database)
+# To create: wrangler d1 create solaris-reef-db
+# To apply schema: wrangler d1 execute solaris-reef-db --file=./schema.sql
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "solaris-reef-db"
+# database_id = "<YOUR_D1_DATABASE_ID_FROM_WRANGLER>"
+
+# Cloudflare KV Namespace (Optional session and cache store)
+# [[kv_namespaces]]
+# binding = "KV"
+# id = "<YOUR_KV_NAMESPACE_ID>"
