@@ -1,3 +1,4 @@
+```yaml
 name: Solaris Reef CI
 
 on:
@@ -14,16 +15,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Bun (supports lockfileVersion: 2)
-        uses: oven-sh/setup-bun@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          bun-version: 1.2.4
+          node-version: 20
+          cache: npm
 
       - name: Install Dependencies
-        run: bun install --frozen-lockfile
+        run: npm install
 
-      - name: Typecheck / Lint
-        run: bun run lint
+      - name: Typecheck
+        run: npm run lint
 
       - name: Build Production Client
-        run: bun run build
+        run: npm run build
+```
