@@ -1,0 +1,6 @@
+# Bun Configuration File
+[install]
+save = true
+
+[install.lockfile]
+save = true

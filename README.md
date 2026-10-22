@@ -128,7 +128,9 @@ The project is structured to deploy natively to **Cloudflare Pages with Cloudfla
    - **Build command:** `npm run build`
    - **Build output directory:** `dist`
    - **Root directory:** `/`
-4. Under **Environment variables**, add:
+4. Under **Environment variables**, configure:
+   - `BUN_VERSION`: `1.2.4` (Ensures Cloudflare Pages uses Bun >= 1.2 to parse `bun.lock` with `lockfileVersion: 2`. The repository's root `.bun-version` and `wrangler.toml` also enforce this automatically)
+   - `NODE_VERSION`: `20.18.0`
    - `BILLPLZ_SANDBOX`: `true` (or `false` for live production)
    - `BILLPLZ_API_KEY`: Your Billplz secret key
    - `BILLPLZ_COLLECTION_ID`: Your Billplz collection ID
