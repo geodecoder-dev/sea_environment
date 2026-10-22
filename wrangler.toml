@@ -19,7 +19,7 @@ ADMIN_EMAIL = "admin@leolion-solaris.org"
 [[d1_databases]]
 binding = "DB"
 database_name = "solaris-reef-db"
-database_id = "solaris-reef-db"
+database_id = "949758ab-a77b-4ddb-8dea-e0f4c70d4607"
 
 # Cloudflare R2 Media Storage Binding (admin photos, documents, certificates)
 # Create bucket: wrangler r2 bucket create solaris-reef-media
