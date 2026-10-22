@@ -62,6 +62,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     imageUrl: '',
   });
   const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    setUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/admin/uploads', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      setUpdateFormData((prev: any) => ({ ...prev, imageUrl: data.url }));
+    } catch (err: any) {
+      setUploadError(err.message || 'Media upload failed');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   // Donations State
   const [donations, setDonations] = useState<DonationRecord[]>([]);
@@ -825,14 +849,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-[#123047] mb-1">Image URL</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-semibold text-[#123047]">Image Asset / R2 Media</label>
+                        <label className="text-[10px] text-[#247BA0] hover:underline cursor-pointer font-medium">
+                          {uploadingImage ? 'Uploading...' : 'Upload File (R2)'}
+                          <input
+                            type="file"
+                            accept="image/*,application/pdf"
+                            onChange={handleImageFileUpload}
+                            disabled={uploadingImage}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
                       <input
                         type="text"
-                        placeholder="/src/assets/images/..."
+                        placeholder="/src/assets/images/... or /api/media/..."
                         value={updateFormData.imageUrl}
                         onChange={(e) => setUpdateFormData({ ...updateFormData, imageUrl: e.target.value })}
                         className="w-full px-3 py-2 rounded-xl border border-[#123047]/20 text-xs"
                       />
+                      {uploadError && (
+                        <p className="text-[10px] text-red-600 mt-1">{uploadError}</p>
+                      )}
                     </div>
                   </div>
 

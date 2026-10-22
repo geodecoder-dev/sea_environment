@@ -64,13 +64,25 @@ app.all('/api/*', async (req, res) => {
 
     res.status(webRes.status);
     webRes.headers.forEach((value, name) => {
-      res.setHeader(name, value);
+      // Set-Cookie is handled specially in Express
+      if (name.toLowerCase() === 'set-cookie') {
+        res.setHeader('Set-Cookie', value);
+      } else {
+        res.setHeader(name, value);
+      }
     });
 
     const contentType = webRes.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const data = await webRes.json();
       res.json(data);
+    } else if (
+      contentType.includes('image/') ||
+      contentType.includes('application/octet-stream') ||
+      contentType.includes('application/pdf')
+    ) {
+      const arrayBuffer = await webRes.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
     } else {
       const text = await webRes.text();
       res.send(text);

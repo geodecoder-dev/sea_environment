@@ -1,7 +1,11 @@
-import crypto from 'crypto';
+/**
+ * Billplz Payment Gateway Integration for Cloudflare Workers & Node.js
+ * Uses standard Web Fetch and Web Crypto APIs.
+ * Supports credentials passed via Cloudflare environment bindings (env) or process.env.
+ */
 
 export interface BillplzBillOptions {
-  collectionId: string;
+  collectionId?: string;
   email: string;
   name: string;
   amountSen: number;
@@ -29,56 +33,91 @@ export interface BillplzBillResult {
   isSimulated?: boolean;
 }
 
+export interface BillplzConfig {
+  apiKey?: string;
+  collectionId?: string;
+  xSignatureKey?: string;
+  isSandbox?: boolean;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function generateRandomHex(byteCount = 6): string {
+  const bytes = new Uint8Array(byteCount);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
+
 export class BillplzService {
-  private apiKey: string;
-  private collectionId: string;
-  private xSignatureKey: string;
-  private isSandbox: boolean;
-  private baseUrl: string;
+  /**
+   * Resolves configuration dynamically from Cloudflare Worker env or process.env
+   */
+  public resolveConfig(env?: Record<string, any>): Required<BillplzConfig> {
+    const apiKey = env?.BILLPLZ_API_KEY || (typeof process !== 'undefined' ? process.env?.BILLPLZ_API_KEY : '') || '';
+    const collectionId = env?.BILLPLZ_COLLECTION_ID || (typeof process !== 'undefined' ? process.env?.BILLPLZ_COLLECTION_ID : '') || '';
+    const xSignatureKey = env?.BILLPLZ_X_SIGNATURE_KEY || (typeof process !== 'undefined' ? process.env?.BILLPLZ_X_SIGNATURE_KEY : '') || 'solaris_billplz_x_sig_sandbox_key';
+    const sandboxEnv = env?.BILLPLZ_SANDBOX ?? (typeof process !== 'undefined' ? process.env?.BILLPLZ_SANDBOX : 'true');
+    const isSandbox = String(sandboxEnv).toLowerCase() !== 'false';
 
-  constructor() {
-    this.apiKey = process.env.BILLPLZ_API_KEY || '';
-    this.collectionId = process.env.BILLPLZ_COLLECTION_ID || '';
-    this.xSignatureKey = process.env.BILLPLZ_X_SIGNATURE_KEY || 'solaris_billplz_x_sig_sandbox_key';
-    this.isSandbox = process.env.BILLPLZ_SANDBOX !== 'false';
-    this.baseUrl = this.isSandbox
-      ? 'https://www.billplz-sandbox.com/api/v3'
-      : 'https://www.billplz.com/api/v3';
-  }
-
-  public isConfiguredWithRealKeys(): boolean {
-    return Boolean(
-      this.apiKey &&
-      this.apiKey !== 'your_billplz_api_key_here' &&
-      this.collectionId &&
-      this.collectionId !== 'your_billplz_collection_id_here'
-    );
-  }
-
-  public getStatus() {
     return {
-      isSandbox: this.isSandbox,
-      isConfigured: this.isConfiguredWithRealKeys(),
-      collectionIdMasked: this.collectionId
-        ? `${this.collectionId.slice(0, 4)}...${this.collectionId.slice(-3)}`
-        : 'Not Set',
-      hasApiKey: Boolean(this.apiKey && this.apiKey !== 'your_billplz_api_key_here'),
-      hasXSignatureKey: Boolean(this.xSignatureKey && this.xSignatureKey !== 'your_billplz_x_signature_key_here'),
-      baseUrl: this.baseUrl,
-      mode: this.isConfiguredWithRealKeys()
-        ? (this.isSandbox ? 'Live Billplz Sandbox' : 'Live Billplz Production')
-        : 'Interactive Sandbox Simulation Mode'
+      apiKey,
+      collectionId,
+      xSignatureKey,
+      isSandbox,
     };
   }
 
-  public async createBill(options: BillplzBillOptions): Promise<BillplzBillResult> {
-    const isReal = this.isConfiguredWithRealKeys();
+  public isConfiguredWithRealKeys(env?: Record<string, any>): boolean {
+    const config = this.resolveConfig(env);
+    return Boolean(
+      config.apiKey &&
+      config.apiKey !== 'your_billplz_api_key_here' &&
+      config.collectionId &&
+      config.collectionId !== 'your_billplz_collection_id_here'
+    );
+  }
+
+  public getStatus(env?: Record<string, any>) {
+    const config = this.resolveConfig(env);
+    const configured = this.isConfiguredWithRealKeys(env);
+    const baseUrl = config.isSandbox
+      ? 'https://www.billplz-sandbox.com/api/v3'
+      : 'https://www.billplz.com/api/v3';
+
+    return {
+      isSandbox: config.isSandbox,
+      isConfigured: configured,
+      collectionIdMasked: config.collectionId
+        ? `${config.collectionId.slice(0, 4)}...${config.collectionId.slice(-3)}`
+        : 'Not Set',
+      hasApiKey: Boolean(config.apiKey && config.apiKey !== 'your_billplz_api_key_here'),
+      hasXSignatureKey: Boolean(config.xSignatureKey && config.xSignatureKey !== 'your_billplz_x_signature_key_here'),
+      baseUrl,
+      mode: configured
+        ? (config.isSandbox ? 'Live Billplz Sandbox' : 'Live Billplz Production')
+        : 'Interactive Sandbox Simulation Mode',
+    };
+  }
+
+  public async createBill(
+    options: BillplzBillOptions,
+    env?: Record<string, any>
+  ): Promise<BillplzBillResult> {
+    const config = this.resolveConfig(env);
+    const isReal = this.isConfiguredWithRealKeys(env);
+    const baseUrl = config.isSandbox
+      ? 'https://www.billplz-sandbox.com/api/v3'
+      : 'https://www.billplz.com/api/v3';
 
     if (isReal) {
       try {
-        const auth = Buffer.from(`${this.apiKey}:`).toString('base64');
+        const auth = btoa(`${config.apiKey}:`);
         const payload = {
-          collection_id: options.collectionId || this.collectionId,
+          collection_id: options.collectionId || config.collectionId,
           email: options.email,
           name: options.name,
           amount: options.amountSen,
@@ -89,10 +128,10 @@ export class BillplzService {
           reference_1: options.reference1 || 'Solaris Reef',
         };
 
-        const response = await fetch(`${this.baseUrl}/bills`, {
+        const response = await fetch(`${baseUrl}/bills`, {
           method: 'POST',
           headers: {
-            'Authorization': `Basic ${auth}`,
+            Authorization: `Basic ${auth}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(payload),
@@ -103,7 +142,7 @@ export class BillplzService {
           throw new Error(`Billplz API Error (${response.status}): ${errorText}`);
         }
 
-        const data = await response.json();
+        const data = await response.json() as any;
         return {
           id: data.id,
           collectionId: data.collection_id,
@@ -121,18 +160,17 @@ export class BillplzService {
           isSimulated: false,
         };
       } catch (err: any) {
-        console.warn('Real Billplz API call failed, falling back to simulated sandbox bill:', err.message);
-        // Fall back to clean simulated sandbox adapter
+        console.warn('Live Billplz API call error, falling back to sandbox simulator:', err.message);
       }
     }
 
-    // Billplz Sandbox Adapter
-    const simulatedBillId = `bpz_${crypto.randomBytes(6).toString('hex')}`;
+    // Interactive Sandbox Simulator Mode
+    const simulatedBillId = `bpz_${generateRandomHex(6)}`;
     const simulatedUrl = `/billplz-simulation/${simulatedBillId}`;
 
     return {
       id: simulatedBillId,
-      collectionId: options.collectionId || 'sandbox_col_solaris',
+      collectionId: options.collectionId || config.collectionId || 'sandbox_col_solaris',
       paid: false,
       state: 'due',
       amount: options.amountSen,
@@ -148,42 +186,56 @@ export class BillplzService {
   }
 
   /**
-   * Generates a Billplz X-Signature according to official Billplz specifications:
-   * 1. Sort all payload parameters alphabetically by parameter name (excluding x_signature)
-   * 2. Join the values using the pipe '|' character
+   * Generates a Billplz X-Signature using Web Crypto HMAC-SHA256 according to Billplz specs:
+   * 1. Sort all payload parameters alphabetically (excluding x_signature)
+   * 2. Join values using the pipe '|' character
    * 3. Compute HMAC-SHA256 hash using the X-Signature key
    */
-  public generateXSignature(params: Record<string, any>): string {
+  public async generateXSignature(
+    params: Record<string, any>,
+    env?: Record<string, any>
+  ): Promise<string> {
+    const config = this.resolveConfig(env);
     const keys = Object.keys(params)
       .filter((k) => k !== 'x_signature')
       .sort();
 
     const dataString = keys.map((k) => String(params[k] ?? '')).join('|');
-    const hmac = crypto.createHmac('sha256', this.xSignatureKey);
-    hmac.update(dataString);
-    return hmac.digest('hex');
+    const enc = new TextEncoder();
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(config.xSignatureKey),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+
+    const signatureBuffer = await crypto.subtle.sign('HMAC', key, enc.encode(dataString));
+    return bytesToHex(new Uint8Array(signatureBuffer));
   }
 
   /**
-   * Verifies the Billplz X-Signature with timing-safe comparison
+   * Verifies the Billplz X-Signature using Web Crypto with timing-safe comparison.
    */
-  public verifyXSignature(params: Record<string, any>, signature: string): boolean {
+  public async verifyXSignature(
+    params: Record<string, any>,
+    signature: string,
+    env?: Record<string, any>
+  ): Promise<boolean> {
     if (!signature) return false;
     try {
-      const expected = this.generateXSignature(params);
-      const signatureBuf = Buffer.from(signature);
-      const expectedBuf = Buffer.from(expected);
-      if (signatureBuf.length !== expectedBuf.length) {
-        return false;
+      const expected = await this.generateXSignature(params, env);
+      if (signature.length !== expected.length) return false;
+
+      let result = 0;
+      for (let i = 0; i < signature.length; i++) {
+        result |= signature.charCodeAt(i) ^ expected.charCodeAt(i);
       }
-      return crypto.timingSafeEqual(signatureBuf, expectedBuf);
+      return result === 0;
     } catch {
       return false;
     }
-  }
-
-  public getXSignatureKey(): string {
-    return this.xSignatureKey;
   }
 }
 

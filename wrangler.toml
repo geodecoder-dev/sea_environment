@@ -12,16 +12,22 @@ NODE_VERSION = "20.18.0"
 BILLPLZ_SANDBOX = "true"
 ADMIN_EMAIL = "admin@leolion-solaris.org"
 
-# Cloudflare D1 Database Binding (Optional production persistent database)
-# To create: wrangler d1 create solaris-reef-db
-# To apply schema: wrangler d1 execute solaris-reef-db --file=./schema.sql
-#
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "solaris-reef-db"
-# database_id = "<YOUR_D1_DATABASE_ID_FROM_WRANGLER>"
+# Cloudflare D1 Database Binding
+# Create production database: wrangler d1 create solaris-reef-db
+# Initialize schema: wrangler d1 execute solaris-reef-db --file=./schema.sql
+# For local D1 dev: wrangler pages dev dist --d1=DB=solaris-reef-db
+[[d1_databases]]
+binding = "DB"
+database_name = "solaris-reef-db"
+database_id = "solaris-reef-db"
 
-# Cloudflare KV Namespace (Optional session and cache store)
+# Cloudflare R2 Media Storage Binding (admin photos, documents, certificates)
+# Create bucket: wrangler r2 bucket create solaris-reef-media
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "solaris-reef-media"
+
+# Optional Cloudflare KV Namespace (session/cache storage)
 # [[kv_namespaces]]
 # binding = "KV"
-# id = "<YOUR_KV_NAMESPACE_ID>"
+# id = "solaris-reef-kv"

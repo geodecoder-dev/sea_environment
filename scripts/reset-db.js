@@ -5,10 +5,13 @@ const dbPath = path.resolve(process.cwd(), 'data', 'database.json');
 try {
   if (fs.existsSync(dbPath)) {
     fs.unlinkSync(dbPath);
-    console.log('✅ Local database reset. Fresh seed data will be generated on next start.');
-  } else {
-    console.log('ℹ️  No existing database file found. Initial seed will load automatically.');
+    console.log('✅ Local JSON cache cleaned.');
   }
-} catch (err) {
-  console.error('Failed to reset database:', err);
+} catch {
+  // Ignored
 }
+
+console.log('🌿 Database reset instructions:');
+console.log('   - For Cloudflare D1 local: npm run d1:local');
+console.log('   - For Cloudflare D1 production: npm run d1:init');
+console.log('   - For Node dev server: In-memory database automatically boots with fresh seed.');
