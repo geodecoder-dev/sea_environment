@@ -1,7 +1,14 @@
 import React from 'react';
 import { ShieldCheck, Compass, Users, Sparkles } from 'lucide-react';
+import { siteConfig } from '../config/site';
 
-export const CampaignOverview: React.FC = () => {
+interface CampaignOverviewProps {
+  verifiedCoralPlantingCount?: number;
+}
+
+export const CampaignOverview: React.FC<CampaignOverviewProps> = ({
+  verifiedCoralPlantingCount = 0,
+}) => {
   return (
     <section id="overview" className="py-20 bg-[#FFFDF7] border-t border-[#123047]/10 relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -15,7 +22,7 @@ export const CampaignOverview: React.FC = () => {
             Why Our Reefs Need Hands in the Water
           </h2>
           <p className="mt-4 text-base sm:text-lg text-[#123047]/75 leading-relaxed">
-            Coral reefs are the rainforests of the ocean. In Malaysia’s tropical seas, they shelter more than 3,000 species of marine flora and fauna. Yet, climate spikes and human disturbance have left large swaths of seabed fractured.
+            {siteConfig.claims.speciesCountDescription}
           </p>
         </div>
 
@@ -33,11 +40,11 @@ export const CampaignOverview: React.FC = () => {
                 1. Fragile Coastal Keystone
               </h3>
               <p className="text-sm text-[#123047]/80 leading-relaxed">
-                Although reefs cover less than 1% of the world’s seabed, they support 25% of all marine life. In Malaysia, healthy barrier reefs dissipate up to 97% of wave energy, defending coastal villages from seasonal monsoons and coastal erosion.
+                {siteConfig.claims.marineLifeKeystoneDescription}
               </p>
             </div>
             <div className="mt-6 pt-4 border-t border-[#123047]/10 text-xs text-[#123047]/70 font-medium">
-              Source: Reef Check Malaysia & Department of Fisheries
+              {siteConfig.claims.keystoneSource}
             </div>
           </div>
 
@@ -55,7 +62,7 @@ export const CampaignOverview: React.FC = () => {
               </p>
             </div>
             <div className="mt-6 pt-4 border-t border-[#123047]/10 text-xs text-[#247BA0] font-medium">
-              Over 7,000 corals secured via Coral Clips
+              {verifiedCoralPlantingCount.toLocaleString('en-MY')} corals secured via Coral Clips
             </div>
           </div>
 
@@ -74,7 +81,7 @@ export const CampaignOverview: React.FC = () => {
               </p>
             </div>
             <div className="mt-6 pt-4 border-t border-[#123047]/10 text-xs text-[#426B50] font-medium">
-              56 certified youth & citizen conservation divers
+              Citizen conservation divers & researchers
             </div>
           </div>
 
@@ -86,7 +93,7 @@ export const CampaignOverview: React.FC = () => {
           <div className="lg:col-span-5 relative">
             <div className="rounded-2xl overflow-hidden border-4 border-white shadow-lg rotate-[-1deg]">
               <img
-                src="/src/assets/images/coral_fragment_nursery_1792397670199.jpg"
+                src="/images/coral_fragment_nursery_1792397670199.jpg"
                 alt="Underwater steel nursery spider grid with tagged coral fragments"
                 className="w-full h-72 object-cover"
                 loading="lazy"
@@ -107,7 +114,7 @@ export const CampaignOverview: React.FC = () => {
             </h3>
             
             <p className="mt-4 text-sm sm:text-base text-[#123047]/80 leading-relaxed">
-              Donations are never consumed by corporate overhead. We operate as an NGO club with volunteer labor. 100% of campaign proceeds go straight into metal spider-frame fabrication, eco-friendly marine adhesive, dive boat fuel, and benthic survey equipment.
+              {siteConfig.claims.zeroOverheadDescription}
             </p>
 
             <div className="mt-6 flex flex-wrap gap-4 text-xs text-[#123047] font-medium">

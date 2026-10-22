@@ -8,10 +8,9 @@ interface DonationSectionProps {
 }
 
 const PRESET_AMOUNTS = [
-  { rm: 10, label: 'RM 10', fragments: '1 fragment', impact: 'Cultivates 1 micro-fragment on our Tioman nursery frame.' },
-  { rm: 25, label: 'RM 25', fragments: '3 fragments', impact: 'Prepares and attaches 3 fragments using non-toxic marine adhesive.' },
-  { rm: 50, label: 'RM 50', fragments: '6 fragments', impact: 'Funds 6 fragments plus 6 months of benthic health monitoring.' },
-  { rm: 100, label: 'RM 100', fragments: '12 fragments', impact: 'Adopt a full spider-frame arm (12 fragments) tagged by our divers.' },
+
+  { rm: 50, label: 'RM 50', fragments: '1 fragment', impact: 'Funds 1 fragment plus 12 months of benthic health monitoring and updates.' },
+  { rm: 100, label: 'RM 500', fragments: '10 fragments', impact: 'Adopt a full spider-frame (10 fragments) tagged by our divers and 12 months of update.' },
 ];
 
 export const DonationSection: React.FC<DonationSectionProps> = ({
@@ -42,10 +41,9 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
   };
 
   const getImpactDescription = (rm: number) => {
-    if (rm <= 10) return 'Cultivates 1 resilient coral fragment in our marine nursery.';
-    if (rm <= 25) return 'Funds 3 fragments and dive gear maintenance for volunteer planting.';
-    if (rm <= 50) return 'Cultivates 6 fragments with photogrammetric survival monitoring.';
-    if (rm <= 100) return 'Adopts 12 coral fragments onto an anchor frame in the Marine Park.';
+  
+    if (rm <= 50) return 'Cultivates 1 fragment with photogrammetric survival monitoring and updates for 12 months.';
+    if (rm <= 500) return 'Adopts 10 coral fragments onto an anchor frame and updates for 12 months.';
     const frags = Math.floor(rm / 8);
     return `Powers an estimated ${frags} coral fragments and community diver missions!`;
   };
@@ -60,7 +58,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
     }
 
     if (!donorEmail || !donorEmail.includes('@')) {
-      setErrorMessage('Please enter a valid email address to receive your payment receipt.');
+      setErrorMessage('Please enter a valid email address to receive your payment receipt and regular updates.');
       return;
     }
 

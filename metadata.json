@@ -1,6 +1,0 @@
-{
-  "name": "Solaris Reef — Coral Restoration Hub",
-  "description": "Leo-Lion Club of KL Solaris flagship coral planting and marine restoration campaign platform with real-time impact tracking, admin management, and secure Billplz donations.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

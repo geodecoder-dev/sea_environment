@@ -9,8 +9,11 @@ BUN_VERSION = "1.2.4"
 NODE_VERSION = "20.18.0"
 
 [vars]
-BILLPLZ_SANDBOX = "true"
-ADMIN_EMAIL = "admin@leolion-solaris.org"
+BILLPLZ_SANDBOX = "false"
+# Note: Production secrets (ADMIN_EMAIL, ADMIN_PASSWORD, SESSION_SECRET,
+# BILLPLZ_API_KEY, BILLPLZ_COLLECTION_ID, BILLPLZ_X_SIGNATURE_KEY) must be
+# set securely as Cloudflare Pages secrets (via Dashboard or wrangler secret put)
+# and never committed in plaintext.
 
 # Cloudflare D1 Database Binding
 # Create production database: wrangler d1 create solaris-reef-db

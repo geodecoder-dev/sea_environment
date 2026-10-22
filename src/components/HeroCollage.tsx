@@ -78,7 +78,7 @@ export const HeroCollage: React.FC<HeroCollageProps> = ({
                 <p className="text-2xl sm:text-3xl font-serif font-bold text-[#123047] tabular-nums">
                   {campaign.verifiedCoralPlantingCount.toLocaleString()}
                 </p>
-                <p className="text-xs text-[#123047]/65 mt-0.5">Fragments Planted</p>
+                <p className="text-xs text-[#123047]/65 mt-0.5">Fragments Funded</p>
               </div>
               <div>
                 <p className="text-2xl sm:text-3xl font-serif font-bold text-[#247BA0] tabular-nums">
@@ -105,7 +105,7 @@ export const HeroCollage: React.FC<HeroCollageProps> = ({
             {/* Main Primary Image Container */}
             <div className="relative rounded-2xl overflow-hidden shadow-xl border-4 border-white bg-white rotate-1 transition-transform hover:rotate-0 duration-300">
               <img
-                src="/src/assets/images/hero_coral_reef_1792397670201.jpg"
+                src="/images/hero_coral_reef_1792397670201.jpg"
                 alt="Flourishing coral reef sanctuary restored by Solaris Reef divers"
                 className="w-full h-80 sm:h-96 object-cover"
                 loading="eager"
@@ -135,23 +135,29 @@ export const HeroCollage: React.FC<HeroCollageProps> = ({
               <div className="w-full h-2.5 bg-[#F4E9D8] rounded-full overflow-hidden my-2">
                 <div
                   className="h-full bg-gradient-to-r from-[#247BA0] to-[#FF7F6A] transition-all duration-1000 ease-out"
-                  style={{ width: `${Math.min(100, campaign.percentAchieved)}%` }}
+                  style={{ width: `${Math.min(100, Math.max(0, campaign.percentAchieved || 0))}%` }}
                 />
               </div>
 
               <div className="flex items-center justify-between text-xs pt-1 text-[#123047]/80">
                 <span className="font-semibold text-[#123047] tabular-nums">
-                  RM {campaign.totalRaisedRm.toLocaleString('en-MY', { minimumFractionDigits: 0 })}
+                  RM {(campaign.totalRaisedRm || 0).toLocaleString('en-MY', { minimumFractionDigits: 0 })}
                 </span>
                 <span className="text-[#123047]/60 tabular-nums">
-                  Goal: RM {campaign.fundraisingTargetRm.toLocaleString('en-MY')}
+                  Goal: RM {(campaign.fundraisingTargetRm || 0).toLocaleString('en-MY')}
                 </span>
               </div>
 
-              <div className="mt-3 pt-2 border-t border-[#123047]/10 flex items-center gap-1.5 text-[11px] text-[#426B50] font-medium">
-                <Anchor className="w-3 h-3 text-[#247BA0]" />
-                <span>Next Nursery Spider Grid at RM 30,000</span>
-              </div>
+              {(() => {
+                const nextMilestone = campaign.milestones?.find((m) => !m.achieved);
+                if (!nextMilestone) return null;
+                return (
+                  <div className="mt-3 pt-2 border-t border-[#123047]/10 flex items-center gap-1.5 text-[11px] text-[#426B50] font-medium">
+                    <Anchor className="w-3 h-3 text-[#247BA0]" />
+                    <span>{nextMilestone.title} at RM {(nextMilestone.targetSen / 100).toLocaleString('en-MY')}</span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Scrapbook Sticker: Every Fragment Matters */}

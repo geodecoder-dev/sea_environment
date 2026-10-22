@@ -1,12 +1,19 @@
 import React from 'react';
 import { Trophy } from 'lucide-react';
 import { CampaignData } from '../types';
+import { siteConfig } from '../config/site';
 
 interface CampaignProgressProps {
   campaign: CampaignData;
 }
 
 export const CampaignProgress: React.FC<CampaignProgressProps> = ({ campaign }) => {
+  const percentFunded = campaign.percentAchieved || 0;
+  const coralPercentage =
+    campaign.coralPlantingTarget > 0
+      ? Math.round(((campaign.verifiedCoralPlantingCount || 0) / campaign.coralPlantingTarget) * 100)
+      : 0;
+
   return (
     <section id="impact" className="py-20 bg-[#FFFDF7] border-t border-[#123047]/10 relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -36,17 +43,17 @@ export const CampaignProgress: React.FC<CampaignProgressProps> = ({ campaign }) 
               <Trophy className="w-5 h-5 text-[#FF7F6A]" />
             </div>
             <div className="text-3xl font-serif font-bold text-[#123047] tabular-nums">
-              RM {campaign.totalRaisedRm.toLocaleString('en-MY', { minimumFractionDigits: 0 })}
+              RM {(campaign.totalRaisedRm || 0).toLocaleString('en-MY', { minimumFractionDigits: 0 })}
             </div>
             <div className="mt-2 text-xs text-[#123047]/65 flex items-center justify-between">
-              <span>Goal: RM {campaign.fundraisingTargetRm.toLocaleString('en-MY')}</span>
-              <span className="font-semibold text-[#426B50]">{campaign.percentAchieved}%</span>
+              <span>Goal: RM {(campaign.fundraisingTargetRm || 0).toLocaleString('en-MY')}</span>
+              <span className="font-semibold text-[#426B50]">{percentFunded}%</span>
             </div>
             {/* Progress bar */}
             <div className="w-full h-2 bg-[#F4E9D8] rounded-full overflow-hidden mt-3">
               <div
                 className="h-full bg-[#FF7F6A] transition-all duration-700 ease-out"
-                style={{ width: `${Math.min(100, campaign.percentAchieved)}%` }}
+                style={{ width: `${Math.min(100, Math.max(0, percentFunded))}%` }}
               />
             </div>
           </div>
@@ -55,24 +62,24 @@ export const CampaignProgress: React.FC<CampaignProgressProps> = ({ campaign }) 
           <div className="p-6 rounded-2xl bg-[#FFFDF7] border border-[#123047]/15 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <span className="text-xs uppercase tracking-wider font-semibold text-[#426B50]">
-                Fragments Planted
+                Fragments Funded
               </span>
               <span className="text-lg">🪸</span>
             </div>
             <div className="text-3xl font-serif font-bold text-[#123047] tabular-nums">
-              {campaign.verifiedCoralPlantingCount.toLocaleString()}
+              {(campaign.verifiedCoralPlantingCount || 0).toLocaleString('en-MY')}
             </div>
             <div className="mt-2 text-xs text-[#123047]/65 flex items-center justify-between">
-              <span>Target: {campaign.coralPlantingTarget.toLocaleString()} frags</span>
+              <span>Target: {(campaign.coralPlantingTarget || 0).toLocaleString('en-MY')} frags</span>
               <span className="font-semibold text-[#426B50]">
-                {Math.round((campaign.verifiedCoralPlantingCount / campaign.coralPlantingTarget) * 100)}%
+                {coralPercentage}%
               </span>
             </div>
             <div className="w-full h-2 bg-[#F4E9D8] rounded-full overflow-hidden mt-3">
               <div
                 className="h-full bg-[#426B50] transition-all duration-700 ease-out"
                 style={{
-                  width: `${Math.min(100, Math.round((campaign.verifiedCoralPlantingCount / campaign.coralPlantingTarget) * 100))}%`,
+                  width: `${Math.min(100, Math.max(0, coralPercentage))}%`,
                 }}
               />
             </div>
@@ -87,13 +94,13 @@ export const CampaignProgress: React.FC<CampaignProgressProps> = ({ campaign }) 
               <span className="text-lg">🤿</span>
             </div>
             <div className="text-3xl font-serif font-bold text-[#123047] tabular-nums">
-              {campaign.volunteerCount}
+              {campaign.volunteerCount || 0}
             </div>
             <div className="mt-2 text-xs text-[#123047]/65">
               Trained divers & shore survey team
             </div>
             <div className="mt-4 text-xs font-medium text-[#247BA0]">
-              +12 joined this month
+              Active community conservation
             </div>
           </div>
 
@@ -106,13 +113,13 @@ export const CampaignProgress: React.FC<CampaignProgressProps> = ({ campaign }) 
               <span className="text-lg">🤝</span>
             </div>
             <div className="text-3xl font-serif font-bold text-[#123047] tabular-nums">
-              {campaign.successfulDonationsCount}
+              {campaign.successfulDonationsCount || 0}
             </div>
             <div className="mt-2 text-xs text-[#123047]/65">
               Verified Billplz contributions
             </div>
             <div className="mt-4 text-xs font-medium text-[#426B50]">
-              100% directly allocated to reef beds
+              {siteConfig.claims.directAllocationBadge}
             </div>
           </div>
 

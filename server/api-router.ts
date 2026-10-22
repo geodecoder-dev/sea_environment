@@ -12,6 +12,7 @@ import {
   createToken,
   verifyToken,
   getAuthTokenFromRequest,
+  AuthenticationConfigError,
 } from './auth.js';
 
 export interface ApiContext {
@@ -33,6 +34,8 @@ export interface ApiContext {
     ADMIN_EMAIL?: string;
     ADMIN_PASSWORD?: string;
     SESSION_SECRET?: string;
+    ENABLE_PAYMENT_SIMULATION?: string;
+    ALLOWED_ORIGINS?: string;
   };
   waitUntil?: (promise: Promise<any>) => void;
 }
@@ -64,21 +67,16 @@ async function getAdminUserFromRequest(
     context.env?.SESSION_SECRET ||
     (typeof process !== 'undefined' ? process.env?.SESSION_SECRET : undefined);
 
+  if (!sessionSecret || sessionSecret.length < 32) {
+    console.error('[AUTH ERROR] SESSION_SECRET is missing or shorter than 32 characters.');
+    throw new AuthenticationConfigError();
+  }
+
   const userId = await verifyToken(token, sessionSecret);
   if (!userId) return null;
 
   const admin = await db.getAdminById(userId, context.env?.DB);
   if (!admin) {
-    // If running in development with default admin ID
-    if (userId === 'admin-1') {
-      const defaultEmail = context.env?.ADMIN_EMAIL || 'admin@leolion-solaris.org';
-      return {
-        id: 'admin-1',
-        name: 'KL Solaris Club Administrator',
-        email: defaultEmail,
-        role: 'superadmin' as const,
-      };
-    }
     return null;
   }
 

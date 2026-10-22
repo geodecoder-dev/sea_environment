@@ -533,7 +533,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
               <div className="p-5 bg-white rounded-2xl border border-[#123047]/15 shadow-xs">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-[#FF7F6A]">
-                  Coral Fragments Planted
+                  Coral Fragments Funded
                 </span>
                 <div className="font-serif text-2xl font-bold text-[#123047] mt-1 tabular-nums">
                   {campaign.verifiedCoralPlantingCount}

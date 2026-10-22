@@ -130,11 +130,23 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
+export class AuthenticationConfigError extends Error {
+  constructor(message: string = 'SESSION_SECRET is missing or shorter than 32 characters') {
+    super(message);
+    this.name = 'AuthenticationConfigError';
+  }
+}
+
 /**
  * Creates an HMAC-SHA256 signed session token using Web Crypto.
+ * Requires SESSION_SECRET of at least 32 characters.
  */
 export async function createToken(userId: string, secret?: string): Promise<string> {
-  const sessionSecret = secret || 'solaris_reef_secure_session_token_key_change_in_production';
+  if (!secret || secret.length < 32) {
+    console.error('[AUTH ERROR] SESSION_SECRET is missing or shorter than 32 characters.');
+    throw new AuthenticationConfigError();
+  }
+  const sessionSecret = secret;
   const timestamp = Date.now();
   const payload = `${userId}:${timestamp}`;
   const enc = new TextEncoder();
@@ -157,11 +169,16 @@ export async function createToken(userId: string, secret?: string): Promise<stri
 
 /**
  * Verifies an HMAC-SHA256 signed session token using Web Crypto.
+ * Requires SESSION_SECRET of at least 32 characters.
  * Session validity is set to 7 days.
  */
 export async function verifyToken(token: string, secret?: string): Promise<string | null> {
   if (!token) return null;
-  const sessionSecret = secret || 'solaris_reef_secure_session_token_key_change_in_production';
+  if (!secret || secret.length < 32) {
+    console.error('[AUTH ERROR] SESSION_SECRET is missing or shorter than 32 characters.');
+    throw new AuthenticationConfigError();
+  }
+  const sessionSecret = secret;
 
   try {
     const decoded = atob(token);
@@ -198,7 +215,10 @@ export async function verifyToken(token: string, secret?: string): Promise<strin
     );
 
     return isValid ? userId : null;
-  } catch {
+  } catch (err) {
+    if (err instanceof AuthenticationConfigError) {
+      throw err;
+    }
     return null;
   }
 }

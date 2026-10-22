@@ -5,19 +5,36 @@ import type { PagesFunction, Env } from './types.js';
  * Tightens CORS, applies security headers, preserves cookies, and handles edge errors.
  */
 export const onRequest: PagesFunction<Env> = async (context) => {
-  const origin = context.request.headers.get('Origin') || '*';
+  const requestUrl = new URL(context.request.url);
+  const siteOrigin = requestUrl.origin;
+  const originHeader = context.request.headers.get('Origin');
   const isOptions = context.request.method === 'OPTIONS';
 
+  // Check allowed origins for credentials: site's own origin or optional ALLOWED_ORIGINS env var
+  const allowedOriginsEnv = (context.env as any)?.ALLOWED_ORIGINS || '';
+  const allowedOriginsList = allowedOriginsEnv
+    .split(',')
+    .map((o: string) => o.trim())
+    .filter(Boolean);
+
+  const isCredentialedOrigin = Boolean(
+    originHeader &&
+    (originHeader === siteOrigin || allowedOriginsList.includes(originHeader))
+  );
+
   const corsHeaders: Record<string, string> = {
-    'Access-Control-Allow-Origin': origin === '*' ? '*' : origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Signature, X-Requested-With, Cookie',
     'Access-Control-Max-Age': '86400',
   };
 
-  if (origin !== '*') {
+  if (isCredentialedOrigin && originHeader) {
+    corsHeaders['Access-Control-Allow-Origin'] = originHeader;
     corsHeaders['Access-Control-Allow-Credentials'] = 'true';
     corsHeaders['Vary'] = 'Origin';
+  } else if (originHeader) {
+    // For other origins, send standard non-credentialed CORS header
+    corsHeaders['Access-Control-Allow-Origin'] = '*';
   }
 
   // Handle CORS Preflight immediately at edge
@@ -32,7 +49,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     const response = await context.next();
     const headers = new Headers(response.headers);
 
-    // Apply CORS headers to response if not already present
+    // Apply CORS headers to response
     for (const [key, val] of Object.entries(corsHeaders)) {
       if (!headers.has(key)) {
         headers.set(key, val);

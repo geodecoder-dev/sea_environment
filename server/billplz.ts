@@ -59,9 +59,9 @@ export class BillplzService {
   public resolveConfig(env?: Record<string, any>): Required<BillplzConfig> {
     const apiKey = env?.BILLPLZ_API_KEY || (typeof process !== 'undefined' ? process.env?.BILLPLZ_API_KEY : '') || '';
     const collectionId = env?.BILLPLZ_COLLECTION_ID || (typeof process !== 'undefined' ? process.env?.BILLPLZ_COLLECTION_ID : '') || '';
-    const xSignatureKey = env?.BILLPLZ_X_SIGNATURE_KEY || (typeof process !== 'undefined' ? process.env?.BILLPLZ_X_SIGNATURE_KEY : '') || 'solaris_billplz_x_sig_sandbox_key';
-    const sandboxEnv = env?.BILLPLZ_SANDBOX ?? (typeof process !== 'undefined' ? process.env?.BILLPLZ_SANDBOX : 'true');
-    const isSandbox = String(sandboxEnv).toLowerCase() !== 'false';
+    const xSignatureKey = env?.BILLPLZ_X_SIGNATURE_KEY || (typeof process !== 'undefined' ? process.env?.BILLPLZ_X_SIGNATURE_KEY : '') || '';
+    const sandboxEnv = env?.BILLPLZ_SANDBOX ?? (typeof process !== 'undefined' ? process.env?.BILLPLZ_SANDBOX : 'false');
+    const isSandbox = String(sandboxEnv).toLowerCase() === 'true';
 
     return {
       apiKey,
@@ -69,6 +69,11 @@ export class BillplzService {
       xSignatureKey,
       isSandbox,
     };
+  }
+
+  public isSimulationEnabled(env?: Record<string, any>): boolean {
+    const val = env?.ENABLE_PAYMENT_SIMULATION ?? (typeof process !== 'undefined' ? process.env?.ENABLE_PAYMENT_SIMULATION : undefined);
+    return String(val) === 'true';
   }
 
   public isConfiguredWithRealKeys(env?: Record<string, any>): boolean {
@@ -84,22 +89,26 @@ export class BillplzService {
   public getStatus(env?: Record<string, any>) {
     const config = this.resolveConfig(env);
     const configured = this.isConfiguredWithRealKeys(env);
+    const simulationEnabled = this.isSimulationEnabled(env);
     const baseUrl = config.isSandbox
       ? 'https://www.billplz-sandbox.com/api/v3'
       : 'https://www.billplz.com/api/v3';
 
+    let modeDesc = configured
+      ? (config.isSandbox ? 'Live Billplz Sandbox' : 'Live Billplz Production')
+      : (simulationEnabled ? 'Interactive Sandbox Simulation Mode' : (config.isSandbox ? 'Sandbox Mode (Offline)' : 'Live Production (Offline)'));
+
     return {
       isSandbox: config.isSandbox,
       isConfigured: configured,
+      isSimulationEnabled: simulationEnabled,
       collectionIdMasked: config.collectionId
         ? `${config.collectionId.slice(0, 4)}...${config.collectionId.slice(-3)}`
         : 'Not Set',
       hasApiKey: Boolean(config.apiKey && config.apiKey !== 'your_billplz_api_key_here'),
       hasXSignatureKey: Boolean(config.xSignatureKey && config.xSignatureKey !== 'your_billplz_x_signature_key_here'),
       baseUrl,
-      mode: configured
-        ? (config.isSandbox ? 'Live Billplz Sandbox' : 'Live Billplz Production')
-        : 'Interactive Sandbox Simulation Mode',
+      mode: modeDesc,
     };
   }
 
@@ -109,6 +118,7 @@ export class BillplzService {
   ): Promise<BillplzBillResult> {
     const config = this.resolveConfig(env);
     const isReal = this.isConfiguredWithRealKeys(env);
+    const simulationAllowed = this.isSimulationEnabled(env);
     const baseUrl = config.isSandbox
       ? 'https://www.billplz-sandbox.com/api/v3'
       : 'https://www.billplz.com/api/v3';
@@ -160,11 +170,18 @@ export class BillplzService {
           isSimulated: false,
         };
       } catch (err: any) {
-        console.warn('Live Billplz API call error, falling back to sandbox simulator:', err.message);
+        console.error('Live Billplz API call error:', err.message);
+        if (!simulationAllowed) {
+          throw err;
+        }
       }
     }
 
-    // Interactive Sandbox Simulator Mode
+    if (!isReal && !simulationAllowed) {
+      throw new Error('PAYMENTS_UNAVAILABLE');
+    }
+
+    // Interactive Sandbox Simulator Mode (only when ENABLE_PAYMENT_SIMULATION === "true")
     const simulatedBillId = `bpz_${generateRandomHex(6)}`;
     const simulatedUrl = `/billplz-simulation/${simulatedBillId}`;
 
@@ -196,6 +213,11 @@ export class BillplzService {
     env?: Record<string, any>
   ): Promise<string> {
     const config = this.resolveConfig(env);
+    if (!config.xSignatureKey) {
+      console.error('[BILLPLZ SECURITY] BILLPLZ_X_SIGNATURE_KEY is missing from environment secrets.');
+      throw new Error('BILLPLZ_X_SIGNATURE_KEY_MISSING');
+    }
+
     const keys = Object.keys(params)
       .filter((k) => k !== 'x_signature')
       .sort();

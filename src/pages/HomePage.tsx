@@ -96,7 +96,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
       />
 
       {/* Campaign Overview & Ecological Mission */}
-      <CampaignOverview />
+      <CampaignOverview verifiedCoralPlantingCount={campaign.verifiedCoralPlantingCount} />
 
       {/* Live Campaign Progress Dashboard & Milestones */}
       <CampaignProgress campaign={campaign} />

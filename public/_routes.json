@@ -5,6 +5,7 @@
   ],
   "exclude": [
     "/assets/*",
+    "/images/*",
     "/favicon.ico",
     "/*.jpg",
     "/*.png",
