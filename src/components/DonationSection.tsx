@@ -471,7 +471,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
                   <span>Opening secure checkout...</span>
                 ) : (
                   <>
-                    <span>{isGift ? 'Donate' : 'Donate now'}</span>
+                    <span>{isGift ? 'Donate' : 'Continue to payment'}</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -479,7 +479,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
 
               <p className="flex items-center justify-center gap-2 text-xs text-[#123047]/55 mt-3">
                 <Lock className="w-3.5 h-3.5 text-[#426B50]" />
-                 Receipt emailed after payment.
+                Secure checkout by Billplz. Receipt emailed after payment.
               </p>
             </div>
 
