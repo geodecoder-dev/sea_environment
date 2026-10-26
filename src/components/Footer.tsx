@@ -25,7 +25,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             </div>
 
             <p className="text-sm text-[#FFFDF7]/75 leading-relaxed max-w-sm">
-              An environmental flagship initiative by the <strong className="text-white font-medium">{siteConfig.organisationName}</strong>. Dedicated to marine ecology restoration, youth diver stewardship, and coastal biodiversity revival in Malaysian waters.
+              An environmental initiative by the <strong className="text-white font-medium">{siteConfig.organisationName}</strong>. Dedicated to marine ecology restoration, youth diver stewardship, and coastal biodiversity revival in Malaysian waters.
             </p>
 
             <div className="text-xs text-[#B8E0D2] font-medium pt-1">
@@ -51,7 +51,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               </li>
               <li>
                 <a href="#donate" className="hover:text-white transition-colors">
-                  Contribute via Billplz
+                  Donate
                 </a>
               </li>
             </ul>
@@ -96,12 +96,10 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
         {/* Bottom Bar */}
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#FFFDF7]/60">
           <div>
-            © {new Date().getFullYear()} {siteConfig.organisationName}. Registered Malaysian Non-Governmental Youth & Service Organization.
+            © {new Date().getFullYear()} {siteConfig.organisationName}.
           </div>
           <div className="flex items-center gap-4">
-            <span>Powered by Billplz Payment Gateway</span>
-            <span aria-hidden="true">·</span>
-            <span>Sustainable Web Architecture</span>
+            
           </div>
         </div>
 

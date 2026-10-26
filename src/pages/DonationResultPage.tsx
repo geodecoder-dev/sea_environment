@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Clock, XCircle, AlertCircle, ArrowLeft, Printer, Share2, Waves, RefreshCw } from 'lucide-react';
+import { CheckCircle2, Clock, XCircle, AlertCircle, ArrowLeft, Printer, Share2, Waves, RefreshCw, Mail } from 'lucide-react';
 
 interface DonationResultProps {
   onNavigate: (path: string) => void;
@@ -23,6 +23,8 @@ export const DonationResultPage: React.FC<DonationResultProps> = ({ onNavigate }
   const [verifiedData, setVerifiedData] = useState<VerifiedDonation | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
+  const [isSendingReceipt, setIsSendingReceipt] = useState(false);
+  const [receiptSentMessage, setReceiptSentMessage] = useState<string | null>(null);
 
   // Read reference from URL search params
   const searchParams = new URLSearchParams(window.location.search);
@@ -76,12 +78,35 @@ export const DonationResultPage: React.FC<DonationResultProps> = ({ onNavigate }
     if (navigator.share) {
       navigator.share({
         title: 'I supported Solaris Reef!',
-        text: 'I just contributed to coral reef restoration in Malaysia with Leo-Lion Club of KL Solaris. Join us in reviving our oceans!',
+        text: 'I just contributed to coral reef restoration in Malaysia with Leo-Lion Club of KL Solaris & Coralku. Join us in reviving our oceans!',
         url: window.location.origin,
       }).catch(() => {});
     } else {
       navigator.clipboard.writeText(window.location.origin);
       alert('Campaign link copied to clipboard!');
+    }
+  };
+
+  const handleResendReceipt = async () => {
+    if (!verifiedData?.internalReference) return;
+    setIsSendingReceipt(true);
+    setReceiptSentMessage(null);
+    try {
+      const res = await fetch('/api/donations/send-receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: verifiedData.internalReference }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setReceiptSentMessage(`Receipt dispatched to ${data.email || 'your registered email address'}.`);
+      } else {
+        setReceiptSentMessage(data.error || 'Failed to dispatch email receipt.');
+      }
+    } catch {
+      setReceiptSentMessage('Network error dispatching email receipt.');
+    } finally {
+      setIsSendingReceipt(false);
     }
   };
 
@@ -201,22 +226,38 @@ export const DonationResultPage: React.FC<DonationResultProps> = ({ onNavigate }
                 <div className="flex justify-between py-1">
                   <span className="text-[#123047]/65">Designation</span>
                   <span className="font-medium text-[#247BA0]">
-                    Solaris Reef Coral Micro-Propagation Frame
+                    Citizen Restoration Programme (CRP) — Coralku & Leo-Lion Solaris
+                  </span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-[#123047]/65">Update Service</span>
+                  <span className="font-medium text-[#426B50]">
+                    {verifiedData.amountRm >= 100
+                      ? '1-Year Regular Photogrammetric Updates Included'
+                      : 'Single Coral Fragment Sponsorship'}
                   </span>
                 </div>
               </div>
 
-              {/* Conservation Certificate Note */}
+              {/* Conservation Certificate & Email Dispatch Note */}
               <div className="p-4 rounded-xl bg-[#E8F5F1] border border-[#B8E0D2] flex items-center gap-3">
                 <Waves className="w-5 h-5 text-[#247BA0] shrink-0" />
                 <p className="text-xs text-[#123047]/85 leading-relaxed">
-                  Your donation directly funds staghorn coral cultivation and youth diver planting expeditions at Pulau Tioman Marine Park. Thank you for protecting our oceans!
+                  Your official donation receipt has been dispatched to your email. Your support directly funds spring-steel Coral Clips, nursery spider frames, and scientific monitoring at Pantai Pasir Besar, Pulau Lang Tengah (Terengganu) in scientific partnership with Coralku.
                 </p>
               </div>
 
               {/* Actions */}
               <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleResendReceipt}
+                    disabled={isSendingReceipt}
+                    className="px-4 py-2 text-xs font-semibold text-[#123047] bg-[#B8E0D2] hover:bg-[#A3D4C4] rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>{isSendingReceipt ? 'Sending...' : 'Email Receipt'}</span>
+                  </button>
                   <button
                     onClick={handlePrint}
                     className="px-4 py-2 text-xs font-semibold text-[#123047] bg-[#F4E9D8] hover:bg-[#E8D9C2] rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -240,6 +281,18 @@ export const DonationResultPage: React.FC<DonationResultProps> = ({ onNavigate }
                   Back to Campaign Hub
                 </button>
               </div>
+
+              {receiptSentMessage && (
+                <div className="p-3 bg-[#E8F5F1] border border-[#B8E0D2] rounded-xl text-xs text-[#123047] flex items-center justify-between">
+                  <span>{receiptSentMessage}</span>
+                  <button
+                    onClick={() => setReceiptSentMessage(null)}
+                    className="text-[#123047]/60 hover:text-[#123047] font-semibold text-xs ml-2 cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
 
             </div>
           </div>

@@ -58,7 +58,7 @@ export const CampaignOverview: React.FC<CampaignOverviewProps> = ({
                 2. Coral Clips & Super Corals
               </h3>
               <p className="text-sm text-[#123047]/80 leading-relaxed">
-                Applying Coralku’s pioneering methodology: we deploy spring-steel Coral Clips to anchor resilient fragments directly into limestone reef substrate without toxic epoxy. Coralku’s Project ASSIST cultivates thermo-tolerant genotypes in deep-water nurseries (12m depth) that withstand marine heat spikes.
+                  We use Coralclip® technology to secure coral fragments to natural reef substrates without chemical adhesives. Through Coralku’s Project ASSIST, heat-stress testing and underwater surveys identify naturally heat-tolerant corals for nursery cultivation, supporting more resilient reef restoration as marine heatwaves intensify.
               </p>
             </div>
             <div className="mt-6 pt-4 border-t border-[#123047]/10 text-xs text-[#247BA0] font-medium">
@@ -77,7 +77,7 @@ export const CampaignOverview: React.FC<CampaignOverviewProps> = ({
                 3. Citizen Diver Action
               </h3>
               <p className="text-sm text-[#123047]/80 leading-relaxed">
-                Leo-Lion Club of KL Solaris youth divers work alongside Coralku marine scientists at Pulau Lang Tengah. Citizen divers learn non-invasive fragment collection, frame attachment, and photogrammetry monitoring that resulted in documented multi-species natural spawning.
+                Leo-Lion Club of KL Solaris will work alongside Coralku marine scientists at Pulau Lang Tengah. Citizen divers learn non-invasive fragment collection, frame attachment, and photogrammetry monitoring that resulted in documented multi-species natural spawning.
               </p>
             </div>
             <div className="mt-6 pt-4 border-t border-[#123047]/10 text-xs text-[#426B50] font-medium">
@@ -110,7 +110,7 @@ export const CampaignOverview: React.FC<CampaignOverviewProps> = ({
               Transparent Conservation Workflow
             </span>
             <h3 className="font-serif text-2xl sm:text-3xl font-bold text-[#123047] leading-snug">
-              Every ringgit directly funds physical nursery frames, dive tanks, and survival monitoring.
+              Every cent counts!
             </h3>
             
             <p className="mt-4 text-sm sm:text-base text-[#123047]/80 leading-relaxed">
@@ -123,9 +123,6 @@ export const CampaignOverview: React.FC<CampaignOverviewProps> = ({
               </span>
               <span className="flex items-center gap-1.5 bg-[#FFFDF7] px-3 py-1.5 rounded-lg border border-[#123047]/15">
                 <ShieldCheck className="w-4 h-4 text-[#426B50]" /> Registered NGO Initiative
-              </span>
-              <span className="flex items-center gap-1.5 bg-[#FFFDF7] px-3 py-1.5 rounded-lg border border-[#123047]/15">
-                <ShieldCheck className="w-4 h-4 text-[#426B50]" /> Billplz Audited Transactions
               </span>
             </div>
           </div>

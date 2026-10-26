@@ -44,7 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
             </div>
             <div className="flex flex-col text-left">
               <span className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-[#123047] leading-none">
-                Solaris Reef
+                Reef
               </span>
               <span className="text-[10px] tracking-wider uppercase font-semibold text-[#247BA0] mt-0.5">
                 Leo-Lion KL Solaris
@@ -74,13 +74,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
               className="hover:text-[#247BA0] transition-colors whitespace-nowrap shrink-0 hover:underline underline-offset-8"
             >
               How to Donate
-            </a>
-            <a
-              href="#about-club"
-              onClick={(e) => handleNavClick('#about-club', e)}
-              className="hover:text-[#247BA0] transition-colors whitespace-nowrap shrink-0 hover:underline underline-offset-8"
-            >
-              The Club
+
             </a>
           </nav>
 

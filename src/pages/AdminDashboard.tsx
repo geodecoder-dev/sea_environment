@@ -781,7 +781,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                       description: '',
                       category: 'milestone',
                       publicationStatus: 'published',
-                      imageUrl: '/src/assets/images/volunteer_divers_restoration_1792397671746.jpg',
+                      imageUrl: '/images/volunteer_divers_restoration_1792397671746.jpg',
                     });
                   }}
                   className="px-4 py-2 bg-[#FF7F6A] hover:bg-[#E66652] text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -864,7 +864,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                       </div>
                       <input
                         type="text"
-                        placeholder="/src/assets/images/... or /api/media/..."
+                        placeholder="/images/... or /api/media/..."
                         value={updateFormData.imageUrl}
                         onChange={(e) => setUpdateFormData({ ...updateFormData, imageUrl: e.target.value })}
                         className="w-full px-3 py-2 rounded-xl border border-[#123047]/20 text-xs"

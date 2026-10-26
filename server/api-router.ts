@@ -6,6 +6,7 @@
 
 import { db, D1DatabaseBinding } from './db.js';
 import { billplz } from './billplz.js';
+import { emailService } from './email.js';
 import {
   hashPassword,
   verifyPassword,
@@ -151,12 +152,18 @@ export async function handleUniversalApiRequest(
       const { amountSen, donorName, donorEmail, attributionPreference, message } = body;
 
       const parsedAmount = parseInt(amountSen, 10);
-      if (isNaN(parsedAmount) || parsedAmount < 500) {
-        return jsonResponse({ error: 'Minimum donation is RM 5.00 (500 sen)' }, 400);
+      if (isNaN(parsedAmount) || parsedAmount < 5000) {
+        return jsonResponse({ error: 'Minimum contribution is RM 50.00 (5,000 sen) to sponsor 1 coral fragment.' }, 400);
       }
 
       if (!donorEmail || !donorEmail.includes('@')) {
-        return jsonResponse({ error: 'A valid email address is required for donation receipt' }, 400);
+        return jsonResponse({ error: 'A valid email address is required for donation receipt and regular updates.' }, 400);
+      }
+
+      const isSimulation = billplz.isSimulationEnabled(context.env);
+      const isConfigured = billplz.isConfiguredWithRealKeys(context.env);
+      if (!isConfigured && !isSimulation) {
+        return jsonResponse({ error: 'Payments are temporarily unavailable' }, 503);
       }
 
       const campaign = await db.getCampaign(d1);
@@ -174,20 +181,26 @@ export async function handleUniversalApiRequest(
         (typeof process !== 'undefined' ? process.env?.BILLPLZ_COLLECTION_ID : '') ||
         '';
 
-      const bill = await billplz.createBill(
-        {
-          collectionId,
-          email: donorEmail.trim(),
-          name: donorCleanName,
-          amountSen: parsedAmount,
-          callbackUrl: `${appOrigin}/api/webhooks/billplz`,
-          redirectUrl: `${appOrigin}/donation/result`,
-          description: `Solaris Reef Coral Restoration — ${tempRef}`,
-          reference1Label: 'Campaign',
-          reference1: 'Solaris Reef',
-        },
-        context.env
-      );
+      let bill;
+      try {
+        bill = await billplz.createBill(
+          {
+            collectionId,
+            email: donorEmail.trim(),
+            name: donorCleanName,
+            amountSen: parsedAmount,
+            callbackUrl: `${appOrigin}/api/webhooks/billplz`,
+            redirectUrl: `${appOrigin}/donation/result`,
+            description: `Solaris Reef Coral Restoration — ${tempRef}`,
+            reference1Label: 'Campaign',
+            reference1: 'Solaris Reef',
+          },
+          context.env
+        );
+      } catch (err: any) {
+        console.error('Checkout bill creation error:', err.message);
+        return jsonResponse({ error: 'Payments are temporarily unavailable' }, 503);
+      }
 
       const donation = await db.createDonation(
         {
@@ -238,7 +251,7 @@ export async function handleUniversalApiRequest(
         amountRm: donation.amountSen / 100,
         currency: donation.currency,
         paymentStatus: donation.paymentStatus,
-        donorName: donation.attributionPreference === 'anonymous' ? 'Anonymous Friend' : donation.donorName,
+        donorName: donation.attributionPreference === 'anonymous' ? 'Anonymous Supporter' : donation.donorName,
         attributionPreference: donation.attributionPreference,
         paidAt: donation.paidAt,
         createdAt: donation.createdAt,
@@ -250,6 +263,14 @@ export async function handleUniversalApiRequest(
     // 5. Official Billplz Webhook Callback
     // -------------------------------------------------------------------------
     if (path === '/api/webhooks/billplz' && method === 'POST') {
+      const xSignatureKey =
+        context.env?.BILLPLZ_X_SIGNATURE_KEY ||
+        (typeof process !== 'undefined' ? process.env?.BILLPLZ_X_SIGNATURE_KEY : '');
+      if (!xSignatureKey) {
+        console.error('[BILLPLZ WEBHOOK] Rejected (401): BILLPLZ_X_SIGNATURE_KEY is missing from environment secrets.');
+        return new Response('Unauthorized: BILLPLZ_X_SIGNATURE_KEY not configured', { status: 401 });
+      }
+
       const contentType = request.headers.get('content-type') || '';
       let payload: Record<string, any> = {};
 
@@ -318,6 +339,24 @@ export async function handleUniversalApiRequest(
         d1
       );
 
+      // Dispatch automated receipt and 12-month update enrollment email on verified payment
+      if (nextStatus === 'paid' && isStateChanged) {
+        const includesUpdates = donation.amountSen >= 10000;
+        const coralCount = donation.amountSen < 10000 ? 1 : Math.max(1, Math.floor((donation.amountSen - 5000) / 5000));
+        await emailService.sendDonationReceipt(
+          {
+            donorName: donation.donorName,
+            donorEmail: donation.donorEmail,
+            amountRm: donation.amountSen / 100,
+            internalReference: donation.internalReference,
+            coralCount,
+            includesUpdates,
+            paidAt,
+          },
+          context.env
+        );
+      }
+
       return new Response('OK', { status: 200 });
     }
 
@@ -325,6 +364,10 @@ export async function handleUniversalApiRequest(
     // 6. Interactive Sandbox Simulation Portal Helpers
     // -------------------------------------------------------------------------
     if (path.startsWith('/api/billplz-simulation/') && method === 'GET') {
+      if (!billplz.isSimulationEnabled(context.env)) {
+        return jsonResponse({ error: 'Payment simulation is disabled' }, 404);
+      }
+
       const billId = path.replace('/api/billplz-simulation/', '');
       const donation = await db.getDonationByBillId(billId, d1);
       if (!donation) {
@@ -336,13 +379,16 @@ export async function handleUniversalApiRequest(
         amountSen: donation.amountSen,
         amountRm: donation.amountSen / 100,
         donorName: donation.donorName,
-        donorEmail: donation.donorEmail,
         status: donation.paymentStatus,
         createdAt: donation.createdAt,
       });
     }
 
     if (path === '/api/billplz-simulation/execute' && method === 'POST') {
+      if (!billplz.isSimulationEnabled(context.env)) {
+        return jsonResponse({ error: 'Payment simulation is disabled' }, 404);
+      }
+
       const body = ((await request.json().catch(() => ({}))) as any) || {};
       const { billId, action } = body;
       const donation = await db.getDonationByBillId(billId, d1);
@@ -352,6 +398,7 @@ export async function handleUniversalApiRequest(
 
       const isSuccess = action === 'pay_success';
       const status = isSuccess ? 'paid' : action === 'cancel' ? 'cancelled' : 'failed';
+      const paidAtTime = isSuccess ? new Date().toISOString() : '';
 
       const callbackPayload: Record<string, any> = {
         id: billId,
@@ -364,16 +411,13 @@ export async function handleUniversalApiRequest(
         email: donation.donorEmail,
         name: donation.donorName,
         url: `/billplz-simulation/${billId}`,
-        paid_at: isSuccess ? new Date().toISOString() : '',
+        paid_at: paidAtTime,
       };
-
-      const signature = await billplz.generateXSignature(callbackPayload, context.env);
-      callbackPayload.x_signature = signature;
 
       const { isStateChanged } = await db.updateDonationPaymentStatus(
         donation.internalReference,
         status,
-        callbackPayload.paid_at,
+        paidAtTime,
         d1
       );
 
@@ -388,11 +432,90 @@ export async function handleUniversalApiRequest(
         d1
       );
 
+      if (isSuccess && isStateChanged) {
+        const includesUpdates = donation.amountSen >= 10000;
+        const coralCount = donation.amountSen < 10000 ? 1 : Math.max(1, Math.floor((donation.amountSen - 5000) / 5000));
+        await emailService.sendDonationReceipt(
+          {
+            donorName: donation.donorName,
+            donorEmail: donation.donorEmail,
+            amountRm: donation.amountSen / 100,
+            internalReference: donation.internalReference,
+            coralCount,
+            includesUpdates,
+            paidAt: paidAtTime,
+          },
+          context.env
+        );
+      }
+
       return jsonResponse({
         ok: true,
         status,
         internalReference: donation.internalReference,
         redirectResultUrl: `/donation/result?ref=${donation.internalReference}`,
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. Explicit Email Service Endpoints
+    // -------------------------------------------------------------------------
+    if (path === '/api/donations/send-receipt' && method === 'POST') {
+      const body = ((await request.json().catch(() => ({}))) as any) || {};
+      const { reference } = body;
+      if (!reference) {
+        return jsonResponse({ error: 'Donation reference is required' }, 400);
+      }
+
+      const donation = await db.getDonationByReference(reference, d1);
+      if (!donation) {
+        return jsonResponse({ error: 'Donation record not found' }, 404);
+      }
+
+      const includesUpdates = donation.amountSen >= 10000;
+      const coralCount = donation.amountSen < 10000 ? 1 : Math.max(1, Math.floor((donation.amountSen - 5000) / 5000));
+      const result = await emailService.sendDonationReceipt(
+        {
+          donorName: donation.donorName,
+          donorEmail: donation.donorEmail,
+          amountRm: donation.amountSen / 100,
+          internalReference: donation.internalReference,
+          coralCount,
+          includesUpdates,
+          paidAt: donation.paidAt || donation.createdAt,
+        },
+        context.env
+      );
+
+      return jsonResponse({
+        ok: true,
+        message: 'Receipt dispatched successfully',
+        simulated: result.simulated,
+        email: donation.donorEmail,
+      });
+    }
+
+    if (path === '/api/contact/inquiry' && method === 'POST') {
+      const body = ((await request.json().catch(() => ({}))) as any) || {};
+      const { name, email, phone, organisation, message } = body;
+      if (!name || !email || !message) {
+        return jsonResponse({ error: 'Name, email, and message are required' }, 400);
+      }
+
+      await emailService.sendContactInquiry(
+        {
+          name: String(name).trim(),
+          email: String(email).trim(),
+          phone: phone ? String(phone).trim() : undefined,
+          organisation: organisation ? String(organisation).trim() : undefined,
+          message: String(message).trim(),
+        },
+        context.env
+      );
+
+      return jsonResponse({
+        ok: true,
+        message: 'Thank you! Your Citizen Restoration inquiry has been submitted to Coralku.',
       });
     }
 

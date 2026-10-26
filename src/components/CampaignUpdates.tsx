@@ -129,7 +129,7 @@ export const CampaignUpdates: React.FC<CampaignUpdatesProps> = ({ updates }) => 
                 </div>
 
                 <div className="px-6 pb-6 pt-2 border-t border-[#123047]/10 flex items-center justify-between text-xs text-[#123047]/60 font-medium">
-                  <span>Coralku & KL Solaris Marine Science Team</span>
+                  <span>KL Solaris & Coralku Marine Science Team</span>
                   <span className="font-serif italic">Verified Field Entry</span>
                 </div>
               </article>

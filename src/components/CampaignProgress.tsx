@@ -26,9 +26,6 @@ export const CampaignProgress: React.FC<CampaignProgressProps> = ({ campaign }) 
           <h2 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-bold text-[#123047]">
             Real-Time Conservation Impact
           </h2>
-          <p className="mt-3 text-base text-[#123047]/75">
-            Transparent metrics verified through Billplz transactions and periodic marine dive surveys.
-          </p>
         </div>
 
         {/* 4 Primary KPI Cards */}
@@ -114,9 +111,6 @@ export const CampaignProgress: React.FC<CampaignProgressProps> = ({ campaign }) 
             </div>
             <div className="text-3xl font-serif font-bold text-[#123047] tabular-nums">
               {campaign.successfulDonationsCount || 0}
-            </div>
-            <div className="mt-2 text-xs text-[#123047]/65">
-              Verified Billplz contributions
             </div>
             <div className="mt-4 text-xs font-medium text-[#426B50]">
               {siteConfig.claims.directAllocationBadge}

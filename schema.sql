@@ -120,7 +120,7 @@ INSERT OR IGNORE INTO campaigns (
   'Solaris Reef: Coralku Community Restoration Initiative',
   'solaris-reef',
   'In scientific partnership with Coralku and local marine researchers, Leo-Lion Club of KL Solaris accelerates resilience-based reef restoration at Pulau Lang Tengah and Peninsular marine parks. Utilizing Coral Clips technology, deep-water nurseries, and Project ASSIST super-corals, we restore depleted reefs into self-sustaining, naturally spawning ecosystems.',
-  5000, 250, 0, 0, 'active',
+  500000, 250, 0, 0, 'active',
   'Pulau Lang Tengah & Terengganu Marine Sanctuary, Malaysia',
   '[]',
   '2026-08-01T08:00:00.000Z', '2026-10-19T08:30:00.000Z'

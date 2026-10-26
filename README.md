@@ -110,56 +110,40 @@ npm run dev
 
 ---
 
-## 5. Cloudflare Pages & Workers Deployment
+## 5. Production Deployment (Cloudflare Pages)
 
-The project is structured to deploy natively to **Cloudflare Pages with Cloudflare Functions (Workers)**:
+### Required Pages Secrets
+Set these in the Cloudflare Pages Dashboard under **Settings** → **Environment variables** (or via `wrangler secret put <NAME>`):
+- `ADMIN_EMAIL` — Primary administrator email for auth bootstrapping.
+- `ADMIN_PASSWORD` — Administrator password (minimum 12 characters).
+- `SESSION_SECRET` — Cryptographically random secret for HMAC-SHA256 session tokens (minimum 32 characters).
+- `BILLPLZ_API_KEY` — Production Billplz Secret Key.
+- `BILLPLZ_COLLECTION_ID` — Production Billplz Collection ID.
+- `BILLPLZ_X_SIGNATURE_KEY` — Production Billplz X-Signature Key.
+- `RESEND_API_KEY` — (Optional) Resend API key for real-time automated receipt and notification email delivery.
 
-### Architecture:
-- **Frontend SPA (Cloudflare Pages):** Static build located in `/dist`, with `/public/_redirects` and `/public/_routes.json` ensuring seamless SPA client-side routing.
-- **Backend API (Cloudflare Pages Functions):** Edge functions located in `/functions` (`/functions/api/[[route]].ts`), which Cloudflare Pages automatically discovers and runs as Cloudflare Workers.
-- **Universal Shared Logic:** Both local dev (`server.ts`) and edge functions (`/functions/api/[[route]].ts`) share `/server/api-router.ts`, guaranteeing 100% feature parity.
-- **Wrangler Configuration:** `wrangler.toml` pre-configured with `pages_build_output_dir = "dist"` and `nodejs_compat`.
+### Optional Environment Variables
+- `BILLPLZ_SANDBOX` — Set to `false` for live transactions.
+- `ALLOWED_ORIGINS` — Comma-separated list of allowed CORS origins in addition to the site's own origin.
+- `ENABLE_PAYMENT_SIMULATION` — Set to `"true"` only in non-production environments to allow local/test mock payments (defaults to off in production).
 
-### Deploying via Cloudflare Dashboard (GitHub Integration):
-1. Push the repository to GitHub.
-2. In the **Cloudflare Dashboard**, navigate to **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**.
-3. Select the repository and configure the build settings:
-   - **Framework preset:** `None` (or `Vite`)
-   - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
-   - **Root directory:** `/`
-4. Under **Environment variables**, configure:
-   - `BUN_VERSION`: `1.2.4` (Ensures Cloudflare Pages uses Bun >= 1.2 to parse `bun.lock` with `lockfileVersion: 2`. The repository's root `.bun-version` and `wrangler.toml` also enforce this automatically)
-   - `NODE_VERSION`: `20.18.0`
-   - `BILLPLZ_SANDBOX`: `true` (or `false` for live production)
-   - `BILLPLZ_API_KEY`: Your Billplz secret key
-   - `BILLPLZ_COLLECTION_ID`: Your Billplz collection ID
-   - `BILLPLZ_X_SIGNATURE_KEY`: Your Billplz X-Signature key
-   - `ADMIN_EMAIL`: `admin@leolion-solaris.org`
-   - `ADMIN_PASSWORD`: Your chosen admin password
-   - `SESSION_SECRET`: Random 32+ character secret string
-5. Click **Save and Deploy**. Cloudflare Pages will build the frontend and deploy the `/functions` API routes across its global edge network.
+### Live Database Initialization & Deployment Commands
+Execute these exact commands in order:
 
-### Deploying via Wrangler CLI:
 ```bash
-# Build frontend assets
-npm run pages:build
+# 1. Apply core schema and initial neutral campaign row
+wrangler d1 execute solaris-reef-db --remote --file=./schema.sql
 
-# Deploy directly with Wrangler
-npm run pages:deploy
+# 2. Repair any legacy image URLs to public static assets
+wrangler d1 execute solaris-reef-db --remote --file=./scripts/fix-image-urls.sql
+
+# 3. Purge seeded demo records from the live database
+wrangler d1 execute solaris-reef-db --remote --file=./scripts/clear-demo-data.sql
+
+# 4. Build application and deploy static assets and edge functions
+npm run build
 ```
-
-### Optional: Cloudflare D1 Relational Database Setup:
-If using Cloudflare's serverless D1 SQL database:
-```bash
-# 1. Create D1 database
-npx wrangler d1 create solaris-reef-db
-
-# 2. Add the generated database_id into wrangler.toml under [[d1_databases]]
-
-# 3. Apply schema and initial seeds
-npm run d1:init
-```
+Then deploy `dist/` to Cloudflare Pages (or let Cloudflare Pages Git build deploy `dist/` automatically).
 
 ---
 

@@ -26,16 +26,21 @@ export const HeroCollage: React.FC<HeroCollageProps> = ({
           <div className="flex items-center gap-3 text-xs tracking-wider uppercase font-semibold text-[#247BA0]">
             <span>Leo-Lion Club of KL Solaris</span>
             <span aria-hidden="true">·</span>
-            <span>Coralku Scientific Partnership</span>
+            <span>Coralku Partnership</span>
             <span aria-hidden="true">·</span>
             <span>Pulau Lang Tengah Sanctuary</span>
           </div>
 
           {/* Scrapbook Stamp / Washi Tape Accent */}
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#F4E9D8] border border-[#123047]/15 rounded-md text-xs font-serif font-medium text-[#123047] rotate-1 shadow-sm">
+          <a
+            href="https://www.coralku.org/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#F4E9D8] border border-[#123047]/15 rounded-md text-xs font-serif font-medium text-[#123047] rotate-1 shadow-sm transition-transform hover:rotate-0 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF7F6A]"
+          >
             <Sparkles className="w-3.5 h-3.5 text-[#FF7F6A]" />
-            <span>Resilience-Based Coral Nursery</span>
-          </div>
+            <span>Visit Coralku!</span>
+          </a>
         </div>
 
         {/* Asymmetrical Grid: 2-Column Editorial Split */}
@@ -113,8 +118,8 @@ export const HeroCollage: React.FC<HeroCollageProps> = ({
               />
               <div className="p-4 bg-white">
                 <div className="flex items-center justify-between text-xs text-[#123047]/70">
-                  <span className="font-serif italic">Sector 4 Marine Nursery</span>
-                  <span>Tioman Marine Park</span>
+                  <span className="font-serif italic">Pantai Pasir Besar Nursery</span>
+                  <span>Pulau Lang Tengah, Terengganu</span>
                 </div>
               </div>
             </div>
