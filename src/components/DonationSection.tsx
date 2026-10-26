@@ -9,8 +9,9 @@ interface DonationSectionProps {
 
 const PRESET_AMOUNTS = [
 
-  { rm: 50, label: 'RM 50', fragments: '1 fragment', impact: 'Funds 1 fragment plus 12 months of benthic health monitoring and updates.' },
-  { rm: 100, label: 'RM 500', fragments: '10 fragments', impact: 'Adopt a full spider-frame (10 fragments) tagged by our divers and 12 months of update.' },
+  { rm: 50, label: 'RM 50', fragments: '1 fragment', impact: 'Funds 1 fragment plus benthic health monitoring.' },
+  { rm: 100, label: 'RM100', fragments: '1 fragment + Updates', impact: 'Funds 1 fragment plus monthly updates for 12 months.'},
+  { rm: 500, label: 'RM 500', fragments: '10 fragments', impact: 'Adopt a full spider-frame (10 fragments) tagged by our divers and monthly updates for 12 months.' },
 ];
 
 export const DonationSection: React.FC<DonationSectionProps> = ({
@@ -42,8 +43,9 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
 
   const getImpactDescription = (rm: number) => {
   
-    if (rm <= 50) return 'Cultivates 1 fragment with photogrammetric survival monitoring and updates for 12 months.';
-    if (rm <= 500) return 'Adopts 10 coral fragments onto an anchor frame and updates for 12 months.';
+    if (rm <= 50) return 'Cultivates 1 fragment with photogrammetric survival monitoring.';
+    if (rm <= 100) return 'Cultivates 1 fragment with photogrammetric survival monitoring and monthly updates for 12 months.';
+    if (rm <= 500) return 'Adopts 10 coral fragments onto an anchor frame and monthly updates for 12 months.';
     const frags = Math.floor(rm / 8);
     return `Powers an estimated ${frags} coral fragments and community diver missions!`;
   };
