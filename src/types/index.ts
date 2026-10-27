@@ -56,6 +56,7 @@ export type AttributionPreference = 'public' | 'anonymous';
 export interface DonationRecord {
   id: string;
   internalReference: string;
+  verificationToken?: string;
   campaignId: string;
   donorName: string;
   donorEmail: string;
@@ -63,10 +64,17 @@ export interface DonationRecord {
   currency: 'MYR';
   attributionPreference: AttributionPreference;
   message?: string;
+  referral?: string;
+  coralName?: string;
+  isGift?: boolean;
+  recipientName?: string;
+  recipientEmail?: string;
   billplzBillId: string;
   billplzUrl?: string;
   paymentStatus: PaymentStatus;
   paidAt?: string;
+  receiptSentAt?: string;
+  receiptCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,7 +101,7 @@ export interface WebhookLog {
   id: string;
   billId: string;
   internalRef: string;
-  status: 'valid' | 'invalid_signature' | 'duplicate_ignored' | 'error';
+  status: 'valid' | 'invalid_signature' | 'duplicate_ignored' | 'error' | 'tampered';
   signatureVerified: boolean;
   payloadSummary: string;
   timestamp: string;

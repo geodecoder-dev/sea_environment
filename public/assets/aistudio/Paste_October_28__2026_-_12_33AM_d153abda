@@ -1,0 +1,383 @@
+# Master Prompt: Solaris Reef Hub — Security Remediation, Backend Refactoring and Payment-Ready Architecture
+
+## 1. Role and objective
+
+Act as a senior full-stack engineer, application security engineer, and software architect.
+
+1. Fix the identified security vulnerabilities and backend defects.
+2. Establish a reliable server-side donation and payment state model.
+3. Ensure payment-dependent UI elements reflect authoritative backend data.
+4. Prepare a secure Billplz integration without enabling live payments prematurely.
+5. Restructure the repository for maintainability, testability, and developer collaboration.
+6. Preserve existing features, branding, design, routes, and user experience unless a change is necessary for security or correctness.
+7. Deliver working code, automated tests, database migrations where needed, and updated documentation.
+
+## 2. Rules before modifying the code
+
+First inspect the complete repository, including its source files, package manifests, build configuration, database schema, migrations, environment variables, deployment files, and README.
+
+Treat the existing repository as the source of truth. Verify that each finding below still applies before modifying the corresponding code.
+
+Do not replace the application with a new template. Do not perform a full rewrite solely for stylistic reasons. Preserve working functionality and refactor incrementally.
+
+Do not invent new business rules, assume unspecified infrastructure exists, or introduce unnecessary dependencies. Reuse the project's existing conventions and libraries when appropriate.
+
+## 3. Architecture and code organization
+
+The project currently supports two execution paths:
+
+- Cloudflare Pages Functions, with D1 and optional R2 bindings.
+- A Node.js/Express server for local or self-hosted execution.
+
+Preserve both paths. They must use the same business logic rather than implementing payment rules, authentication, or donation calculations twice.
+
+Refactor the existing repository toward the following logical structure. Adapt it to the actual repository and existing framework requirements rather than moving files mechanically.
+
+### Frontend
+
+- `src/app/` — application initialization, routing, and top-level providers.
+- `src/components/ui/` — reusable presentation components.
+- `src/features/donations/` — donation form, checkout state, result page, donation API client, and donation-specific types.
+- `src/features/campaigns/` — campaign display, fundraising progress, impact information, and campaign queries.
+- `src/features/admin/` — administrator pages, authentication state, campaign management, and administrative API calls.
+- `src/features/contact/` — contact form and related UI.
+- `src/lib/` — shared API client, formatting, and general-purpose utilities.
+- `src/types/` — shared frontend types, only where they are genuinely shared.
+
+Avoid putting business rules inside React components. Components should display server-provided state and handle user interaction, while calculation and data-access logic should be reusable and testable.
+
+### Backend
+
+- `server/routes/` — HTTP route registration and request/response handling.
+- `server/services/` — donation, campaign, payment, receipt, email, and other application business logic.
+- `server/repositories/` — persistence operations and database queries.
+- `server/payments/` — payment-provider interface, Billplz implementation, and development-only test provider.
+- `server/auth/` — password verification, session handling, authorization, and security utilities.
+- `server/middleware/` — request validation, authentication, authorization, rate limiting, and other shared middleware.
+- `server/schemas/` — request validation schemas and shared backend validation rules.
+- `server/db/` — database adapters, migrations, and database-specific types.
+- `server/config/` — validated configuration and environment-variable handling.
+- `server/email/` — receipt generation, HTML templates, escaping, and email delivery.
+- `server/lib/` — small backend-specific utilities.
+
+Keep `server.ts` as a thin Express adapter. Keep `functions/api/[[route]].ts` and any required Cloudflare middleware as thin platform adapters that pass the appropriate runtime bindings into the shared backend.
+
+Retain existing filenames where necessary to avoid breaking imports, framework conventions, or deployment behavior. Use a repository-wide import update and verify the final build after moving files.
+
+Avoid circular dependencies and oversized files. Route handlers should not contain SQL, payment-provider cryptography, email-template construction, or unrelated business rules.
+
+## 4. Security remediation
+
+### 4.1 Administrator authentication and secrets
+
+Inspect the administrator login, password hashing, session signing, and session validation code.
+
+- Remove hard-coded fallback administrator email addresses, passwords, and session secrets.
+- Never permit a known default credential to authenticate against a production deployment.
+- Fail securely when essential production secrets are absent.
+- Use one clearly defined, secure password-verification mechanism. Do not bypass password-hash verification through a separate hard-coded or plaintext credential path.
+- Preserve existing administrator accounts through a deliberate migration or documented credential-rotation procedure.
+- Enforce appropriate session expiry and invalidation.
+- Set session cookies to `HttpOnly`, `Secure` in production, and an appropriate `SameSite` policy.
+- Protect cookie-authenticated state-changing requests against CSRF.
+- Add reasonable login rate limiting and security logging without recording passwords, tokens, or other secrets.
+- Ensure unauthorized users cannot access administrative functions, exports, campaign editing, uploads, or payment-management tools.
+
+Create a safe `.env.example` containing variable names and nonfunctional placeholders only. Do not place usable example credentials in the README.
+
+### 4.2 Payment receipt endpoint
+
+Inspect `POST /api/donations/send-receipt` and all related receipt-generation routes.
+
+The backend must verify that the donation has a valid, persisted, authoritative `paid` status before issuing an official donation receipt.
+
+- Do not generate or send receipts for pending, failed, or cancelled transactions.
+- Do not return stored donor email addresses unnecessarily in API responses.
+- Require an appropriate resend authorization mechanism, protect the endpoint against abuse, and apply rate limiting.
+- Ensure donor-visible references cannot be used to enumerate other donations.
+- HTML-escape all donor-controlled values inserted into email templates.
+- Ensure receipt content comes from validated, persisted donation data rather than values supplied by the browser.
+- Make receipt dispatch idempotent so duplicate callbacks cannot accidentally generate duplicate receipts.
+- Handle email-service failures separately from payment processing. A failed email must never reverse or invalidate a confirmed payment.
+
+### 4.3 Donation-reference security
+
+Inspect the current generation of internal donation references.
+
+Do not use a small random suffix as the sole protection for public donation lookups.
+
+Use a cryptographically secure random token with at least 128 bits of entropy for an opaque donor-facing lookup token. Separate this token from a human-readable receipt number where practical.
+
+Add unique database constraints and collision handling. Ensure public verification responses expose only the minimum necessary donation information.
+
+Apply rate limiting to reference lookup and verification endpoints.
+
+### 4.4 Database persistence and consistency
+
+Inspect every database operation and exception handler in the existing database module.
+
+Do not silently fall back to in-memory storage after a Cloudflare D1 or other persistent database operation fails.
+
+- A failed checkout-record insertion must result in a failed checkout, not a successful response containing an ephemeral donation.
+- A failed payment-status update must produce a retryable webhook failure or another explicitly recoverable result.
+- A payment must not be acknowledged as durably recorded if the database update failed.
+- Do not treat process-local memory as a durable database.
+- Retain an in-memory adapter only for explicitly isolated testing or development if it remains useful.
+- Ensure the Cloudflare adapter always uses the correct runtime `DB` binding.
+- If the self-hosted environment needs persistence, identify and implement an appropriate explicit adapter using existing project capabilities, or clearly reject unsupported production configuration.
+- Use database transactions or atomic conditional updates where appropriate.
+- Preserve existing records and provide reversible, documented migrations wherever possible.
+
+Review SQL queries for injection risks, missing constraints, non-atomic read-modify-write operations, and inconsistencies between the database schema and TypeScript types.
+
+### 4.5 Donation and payment state machine
+
+Implement a single, documented payment-state model.
+
+At a minimum, distinguish `pending`, `paid`, `failed`, and `cancelled`. Include refund or reversal states only where the application requires them.
+
+Define and enforce valid state transitions. A late failure or cancellation callback must not silently change a confirmed paid donation back to an unpaid state.
+
+Use atomic conditional database updates to ensure that duplicate or concurrent callbacks cannot produce duplicate fundraising contributions, duplicate email dispatches, or inconsistent payment states.
+
+Treat a valid, provider-verified server-side payment result as authoritative. Never trust a frontend redirect, query parameter, or client-supplied boolean to confirm payment.
+
+### 4.6 Billplz integration preparation
+
+Billplz has **not yet been configured for live payments**.&#x20;
+
+Prepare the integration properly:
+
+- Define a payment-provider interface that separates application business logic from Billplz-specific behavior.
+- Keep bill creation, callback verification, provider identifiers, and provider-specific response parsing inside the payment integration module.
+- Implement the Billplz signature verification algorithm according to the current official Billplz documentation. Verify the exact input canonicalization, sorting, separators, digest algorithm, and signature comparison requirements.
+- Add automated tests for valid signatures, invalid signatures, missing fields, malformed payloads, and tampered callback values.
+- Map the Billplz bill ID to the internal donation record explicitly. Do not confuse the provider's bill ID with the application's internal reference.
+- Validate the callback against the expected persisted donation, payment amount, currency or currency assumptions, and valid state transitions.
+- Make callback processing idempotent.
+- Return an unsuccessful, retryable result when a valid callback cannot be durably persisted.
+- Do not treat a successful browser redirect as proof of payment.
+- Use a canonical application URL from validated server configuration for callback and redirect URLs. Do not construct trusted payment URLs directly from untrusted `Host` or `X-Forwarded-Host` headers.
+- Separate sandbox and live configuration. Do not permit accidental use of live credentials in automated tests.
+
+### 4.7 Payment simulator
+
+Inspect the existing payment-simulation endpoint and its environment flag.
+
+Simulation may exist for development and automated tests, but a publicly accessible route must never be able to mark a production donation as paid without a genuine verified payment.
+
+Disable simulation in production by construction. Prefer not to register simulation routes at all in production builds or runtimes. Reject conflicting production configuration during startup.
+
+Ensure simulator results use the same business rules and database state machine while remaining clearly separated from real provider callbacks.
+
+### 4.8 Input validation and HTTP security
+
+Audit all public and administrative API endpoints.
+
+- Validate amounts as strictly parsed positive safe integers in the application's smallest currency unit.
+- Reject malformed, fractional, nonnumeric, negative, zero, excessively large, and out-of-range values.
+- Add explicit maximum donation limits based on configurable business rules.
+- Validate strings, email addresses, enumerations, optional fields, and payload sizes on the server.
+- Do not depend on frontend validation for security.
+- Ensure a malicious caller cannot modify another donor's record or invoke administrative operations.
+- Correct the CORS implementation so wildcard headers do not override the intended allowlist.
+- Keep CORS configuration separate from authorization.
+- Restrict file uploads by content type, file signature where relevant, size, and permitted file types. Use safe server-generated object keys and prevent path traversal.
+- Prevent CSV formula injection in exported donor information while preserving legitimate CSV formatting.
+- Redact sensitive values in errors and logs.
+- Apply suitable security headers and request-size limits.
+- Review forwarded-header and trusted-proxy configuration for the Express deployment.
+
+Implement a consistent API error format without disclosing internal stack traces or secret configuration values.
+
+## 5. Donation-impact calculations and payment-dependent UI
+
+Review the frontend components and backend calculations that display fundraising amounts, donor counts, coral-fragment funding, volunteer counts, donation entitlements, and monthly updates.
+
+The backend must be the authoritative source for any UI element that represents confirmed donations or paid benefits.
+
+### 5.1 Fundraising totals and donor counts
+
+- Count only persisted donations with authoritative `paid` status.
+- Do not count pending, failed, or cancelled donations.
+- Ensure duplicate callbacks cannot inflate campaign totals.
+- Make campaign statistics consistent across the campaign page, administrator dashboard, and donation result page.
+- Handle loading, stale, unavailable, empty, and error states.
+- Refresh payment status through a bounded, rate-conscious polling or refresh mechanism where required.
+
+### 5.2 Conservation impact figures
+
+The current application has separate campaign fields for metrics such as fragments funded and youth volunteers. Do not automatically increment these merely because a donor has paid unless an explicit business rule authorizes that relationship.
+
+Keep financial aggregates separate from independently maintained conservation outcomes.
+
+Document which metrics are derived from financial records and which are manually administered or independently verified.
+
+### 5.3 Donation benefits and pricing inconsistencies
+
+Centralize the donation pricing and entitlement rules. Avoid maintaining duplicate formulas in separate React and backend modules.
+
+Investigate the existing inconsistency in which the RM500 preset advertises 25 coral fragments plus updates, while the current formula calculates 9 fragments after subtracting RM50 for updates and dividing the remaining amount by RM50 per fragment.
+
+Do not silently invent a new pricing policy.
+
+- Preserve established, explicitly advertised preset benefits as the intended claims unless the repository documents a different approved policy.
+- Put preset entitlements, minimum contributions, update thresholds, and relevant pricing parameters in one authoritative configuration or domain module.
+- Make custom-amount behavior explicit and consistent with the approved model.
+- If the repository does not establish a coherent custom-amount pricing rule, document the ambiguity and avoid presenting an unverified calculation as a guaranteed entitlement.
+- Add tests for every advertised preset and for threshold boundaries.
+
+The RM100 monthly-update threshold must be consistently enforced in the frontend, backend, and receipt-generation logic. Entitlements must not be granted solely because a user entered an amount into a form; eligibility must depend on a valid, persisted paid donation.
+
+### 5.4 Gift donations and frontend/backend contracts
+
+Inspect `coralName`, `isGift`, `recipientName`, `recipientEmail`, and related gift-donation fields.
+
+The current frontend appears to submit gift-related fields that are not fully processed by the checkout handler.
+
+Decide, based on existing product behavior, whether each field is supported. For supported fields, implement validated persistence, explicit API types, appropriate access controls, and the intended recipient behavior. Remove or clearly disable unsupported UI functionality rather than implying that a gift has been configured when the backend ignores it.
+
+Do not expose recipient information unnecessarily or send official receipts to unverified recipient addresses.
+
+### 5.5 Donation result page
+
+Correct the mismatch between the Billplz provider bill ID and the internal donation reference.
+
+The result page must obtain the correct donation record through a safe server-side lookup or verified mapping.
+
+Provide distinct states for pending, confirmed, failed, cancelled, unknown, and temporarily unavailable transactions.
+
+A pending result must not appear successful. A redirect alone must never unlock paid benefits or produce a receipt.
+
+## 6. Configuration and deployment
+
+Create a centralized, validated configuration layer appropriate for both Cloudflare and Node.js environments.
+
+Document all required and optional variables, including the applicable equivalents for:
+
+- Administrator authentication.
+- Session signing.
+- Canonical public application origin.
+- Database and storage bindings.
+- Payment-provider environment, credentials, and feature flags.
+- Payment simulation.
+- Email delivery.
+- CORS origins.
+- Rate limits and upload limits.
+
+Do not expose secrets through frontend build variables, public API responses, browser bundles, logs, or committed configuration files.
+
+Keep the Cloudflare Pages entrypoint and Express entrypoint as adapters. Ensure both call the same service layer while supplying their own database, storage, and runtime dependencies.
+
+Verify that builds and deployments still work with the existing package manager, scripts, TypeScript configuration, and Cloudflare configuration.
+
+Do not assume that Cloudflare D1 or R2 bindings exist in the standalone Node runtime.
+
+## 7. Automated tests
+
+Add a maintainable automated test suite using the repository's existing test framework when possible. Introduce a new dependency only when it is justified.
+
+At a minimum, implement unit and integration tests for the following.
+
+**Authentication and authorization**
+
+- Missing production secrets cause secure failure.
+- Default administrator credentials cannot authenticate.
+- Unauthenticated and unauthorized users cannot access protected routes.
+- Invalid and expired sessions are rejected.
+- Login rate limiting and cookie settings behave as intended.
+
+**Donation processing**
+
+- Valid amounts and supported donor fields are accepted.
+- Invalid, out-of-range, malformed, and unsafe numeric amounts are rejected.
+- Donation creation does not succeed if persistent storage fails.
+- Predictable or duplicate identifiers are handled correctly.
+- Public lookup responses do not expose unnecessary personal information.
+
+**Payment handling**
+
+- A valid provider signature is accepted.
+- An invalid or tampered signature is rejected.
+- Provider bill IDs resolve to the correct internal donation.
+- Duplicate callbacks are idempotent.
+- Paid donations cannot be reverted through ordinary failure or cancellation callbacks.
+- Failed database updates are retryable.
+- An unconfigured provider cannot collect real payments.
+- Production deployments cannot use the payment simulator to fabricate paid transactions.
+
+**Receipts and emails**
+
+- Pending, failed, and cancelled donations cannot generate official receipts.
+- Only eligible paid donations receive receipts.
+- User-supplied HTML is escaped.
+- Duplicate receipt dispatch is controlled.
+- Email-service failure does not reverse the payment state.
+
+**Campaigns and UI**
+
+- Campaign totals count only paid donations.
+- Duplicate callbacks do not inflate statistics.
+- RM100 threshold behavior is tested immediately below, at, and above the threshold.
+- Every advertised preset produces a consistent entitlement across the frontend, backend, and receipt.
+- Gift-donation inputs match the implemented API contract.
+- The result page correctly handles pending, confirmed, failed, unknown, and unavailable states.
+
+**Platform compatibility**
+
+- Shared API behavior is tested with the appropriate runtime adapters.
+- Type checking, linting, production builds, and database migrations pass.
+
+Use mocked provider responses for tests. Never require live payment credentials to run the normal automated test suite.
+
+## 8. Documentation and developer experience
+
+Update the README and add the following documentation, adapted to the final repository:
+
+- `docs/ARCHITECTURE.md` — system components, request flow, module boundaries, and Cloudflare versus Node.js execution.
+- `docs/SECURITY.md` — authentication, authorization, data handling, payment trust boundaries, and reporting procedures.
+- `docs/PAYMENTS.md` — payment lifecycle, Billplz signature verification, sandbox setup, callback configuration, idempotency, and production activation checklist.
+- `docs/DATABASE.md` — schema, constraints, migrations, and supported database adapters.
+- `docs/DEPLOYMENT.md` — environment variables, Cloudflare bindings, secrets configuration, deployment validation, and rollback procedure.
+- `.env.example` — safe placeholders and short descriptions; no actual credentials.
+
+Include a clear explanation of how to run the project locally, run tests, perform a production build, apply database migrations, and configure sandbox payments.
+
+Document any remaining external prerequisites, such as Billplz merchant credentials, callback configuration, email-provider credentials, or production secrets.
+
+## 9. Development workflow and acceptance criteria
+
+Execute this work in controlled stages:
+
+**Stage A — Inspection.** Map the repository, identify duplicated logic, inspect database schema and all API routes, and verify the findings in this prompt.
+
+**Stage B — Security baseline.** Remove insecure defaults, protect administrative functions, secure receipt generation, strengthen validation, and prevent silent data loss.
+
+**Stage C — Payment architecture.** Implement the payment-provider boundary, payment state machine, safe provider-ID mapping, idempotent callback handling, and secure simulation separation. Keep live payments disabled.
+
+**Stage D — Domain logic and UI.** Centralize donation pricing and entitlement rules, correct inconsistent calculations, reconcile frontend/backend contracts, and ensure financial displays depend on authoritative server data.
+
+**Stage E — Refactoring.** Move responsibilities into maintainable modules, preserve platform adapters, and update imports and types.
+
+**Stage F — Verification.** Run the available tests, type checking, linting, migrations, and production build. Fix regressions introduced by the refactor.
+
+**Stage G — Documentation and handover.** Update architecture, security, payments, database, and deployment documentation.
+
+Do not stop after presenting a plan. Proceed to implement the code changes and validate them within your available tool environment.
+
+If a test cannot run, state exactly which test failed to run and why. Never claim a passing build, successful test, secure deployment, or working live payment without evidence from actual execution.
+
+### Definition of done
+
+The work is complete when:
+
+1. The codebase has the implemented security remediations and a maintainable structure.
+2. Both Cloudflare and Node.js execution paths remain explicitly supported to the extent their adapters permit.
+3. Financial state changes are authoritative, durable, and idempotent.
+4. Unpaid donations cannot generate official receipts or grant paid entitlements.
+5. No default administrator credentials or usable example secrets remain.
+6. Live Billplz processing remains disabled until configuration and sandbox verification are complete.
+7. Payment, receipt, authorization, persistence-failure, and pricing tests cover the identified failure modes.
+8. The original application UI and intended features are preserved except where they need to be corrected.
+9. The README and supporting documentation accurately describe the implemented system.
+10. The final report lists changed files, security findings resolved, tests actually run, outstanding limitations, and the exact steps still required before enabling live payments.

@@ -42,6 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_campaign_updates_pubdate ON campaign_updates(publ
 CREATE TABLE IF NOT EXISTS donations (
   id TEXT PRIMARY KEY,
   internal_reference TEXT UNIQUE NOT NULL,
+  verification_token TEXT UNIQUE NOT NULL,
   campaign_id TEXT NOT NULL,
   donor_name TEXT NOT NULL,
   donor_email TEXT NOT NULL,
@@ -49,17 +50,25 @@ CREATE TABLE IF NOT EXISTS donations (
   currency TEXT NOT NULL DEFAULT 'MYR',
   attribution_preference TEXT NOT NULL DEFAULT 'public',
   message TEXT,
+  referral TEXT,
+  coral_name TEXT,
+  is_gift INTEGER NOT NULL DEFAULT 0,
+  recipient_name TEXT,
+  recipient_email TEXT,
   billplz_bill_id TEXT NOT NULL,
   billplz_url TEXT,
   payment_status TEXT NOT NULL DEFAULT 'pending',
   paid_at TEXT,
   callback_received_at TEXT,
+  receipt_sent_at TEXT,
+  receipt_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_donations_ref ON donations(internal_reference);
+CREATE INDEX IF NOT EXISTS idx_donations_token ON donations(verification_token);
 CREATE INDEX IF NOT EXISTS idx_donations_status ON donations(payment_status);
 CREATE INDEX IF NOT EXISTS idx_donations_bill_id ON donations(billplz_bill_id);
 CREATE INDEX IF NOT EXISTS idx_donations_created ON donations(created_at DESC);
@@ -107,8 +116,6 @@ CREATE INDEX IF NOT EXISTS idx_webhook_logs_time ON webhook_logs(timestamp DESC)
 
 -- =============================================================================
 -- SEED DATA (Campaign & Editorial Updates)
--- Note: Admin accounts are bootstrapped safely at runtime using Cloudflare
--- Worker environment secrets (ADMIN_EMAIL / ADMIN_PASSWORD), preventing secret leaks.
 -- =============================================================================
 
 INSERT OR IGNORE INTO campaigns (
@@ -120,9 +127,8 @@ INSERT OR IGNORE INTO campaigns (
   'Solaris Reef: Coralku Community Restoration Initiative',
   'solaris-reef',
   'In scientific partnership with Coralku and local marine researchers, Leo-Lion Club of KL Solaris accelerates resilience-based reef restoration at Pulau Lang Tengah and Peninsular marine parks. Utilizing Coral Clips technology, deep-water nurseries, and Project ASSIST super-corals, we restore depleted reefs into self-sustaining, naturally spawning ecosystems.',
-  500000, 250, 0, 0, 'active',
+  5000000, 250, 0, 0, 'active',
   'Pulau Lang Tengah & Terengganu Marine Sanctuary, Malaysia',
   '[]',
   '2026-08-01T08:00:00.000Z', '2026-10-19T08:30:00.000Z'
 );
-

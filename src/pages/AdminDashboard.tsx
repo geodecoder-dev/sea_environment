@@ -38,8 +38,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   // Auth state
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
-  const [emailInput, setEmailInput] = useState<string>('admin@leolion-solaris.org');
-  const [passwordInput, setPasswordInput] = useState<string>('SolarisReef2026!');
+  const [emailInput, setEmailInput] = useState<string>('');
+  const [passwordInput, setPasswordInput] = useState<string>('');
   const [loginError, setLoginError] = useState<string | null>(null);
 
   // Active tab in admin panel
@@ -1002,7 +1002,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search by Reference, Donor Name, or Email..."
+                  placeholder="Search by Reference, Donor Name, Email, or Referral..."
                   value={donationSearch}
                   onChange={(e) => {
                     setDonationSearch(e.target.value);
@@ -1039,6 +1039,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                       <th className="py-3 px-4 font-semibold">Donor Email</th>
                       <th className="py-3 px-4 font-semibold text-right">Amount (RM)</th>
                       <th className="py-3 px-4 font-semibold">Status</th>
+                      <th className="py-3 px-4 font-semibold">Referral</th>
                       <th className="py-3 px-4 font-semibold">Billplz ID</th>
                       <th className="py-3 px-4 font-semibold">Date</th>
                     </tr>
@@ -1046,7 +1047,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   <tbody className="divide-y divide-slate-100">
                     {donations.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="py-8 text-center text-slate-400 italic">
+                        <td colSpan={8} className="py-8 text-center text-slate-400 italic">
                           No matching donation records found.
                         </td>
                       </tr>
@@ -1080,6 +1081,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                             >
                               {d.paymentStatus}
                             </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {d.referral ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-[#247BA0]/10 text-[#247BA0]">
+                                {d.referral}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-[11px]">—</span>
+                            )}
                           </td>
                           <td className="py-3 px-4 font-mono text-[10px] text-slate-500">
                             {d.billplzBillId}

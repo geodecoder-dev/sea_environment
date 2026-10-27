@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "tsx server.ts --prod",
+    "test": "vitest run",
     "lint": "tsc --noEmit",
     "db:reset": "node scripts/reset-db.js",
     "pages:build": "vite build",
@@ -42,6 +43,7 @@
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
   }
 }

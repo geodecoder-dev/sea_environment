@@ -33,7 +33,7 @@ export interface SiteConfig {
   };
   contact: SiteContact;
   partners: {
-    academic: string[];
+    academic?: string[];
     hospitality: string;
   };
   coreTeam: TeamMember[];

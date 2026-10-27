@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowRight, Check, Gift, Heart, Lock, Mail, Send, X } from 'lucide-react';
 import { RecentPublicDonation } from '../types';
 
@@ -7,10 +7,12 @@ interface DonationSectionProps {
   onSuccessfulInitiation?: (checkoutUrl: string) => void;
 }
 
+import { calculateEntitlements, MIN_DONATION_RM, UPDATES_THRESHOLD_RM } from '../../shared/pricing';
+
 // ---- Pricing model (single source of truth) -------------------------------
 const FRAGMENT_RM = 50; // 1 coral fragment
 const UPDATES_RM = 50; // 12 months of monthly photo updates
-const MIN_RM = FRAGMENT_RM;
+const MIN_RM = MIN_DONATION_RM;
 
 const PRESETS = [
   { rm: 50, title: '1 Fragment', note: 'Survival monitoring.' },
@@ -21,28 +23,23 @@ const PRESETS = [
 const EMAIL_OK = (v: string) => /^\S+@\S+\.\S+$/.test(v.trim());
 
 const getImpact = (rm: number) => {
-  if (rm < FRAGMENT_RM) {
+  const entitlement = calculateEntitlements(rm);
+  if (rm < MIN_RM) {
     return {
       corals: 0,
       hasUpdates: false,
-      text: `Every RM ${FRAGMENT_RM} sponsors one coral fragment. Smaller amounts can't be matched to a fragment yet.`,
+      text: `Every RM ${MIN_RM} sponsors one coral fragment. Smaller amounts cannot be matched to a fragment yet.`,
     };
   }
-  if (rm < FRAGMENT_RM + UPDATES_RM) {
-    return {
-      corals: 1,
-      hasUpdates: false,
-      text: 'Sponsors 1 coral fragment at Pantai Pasir Besar with photogrammetric survival monitoring.',
-    };
-  }
-  const corals = Math.max(1, Math.floor((rm - UPDATES_RM) / FRAGMENT_RM));
-  const frame = rm >= 500;
+  const isFrame = rm >= 500;
   return {
-    corals,
-    hasUpdates: true,
-    text: frame
-      ? `Adopts a full nursery spider-frame (${corals} fragments) tagged by our divers, plus 12 months of monthly photo updates.`
-      : `Sponsors ${corals} coral fragment${corals > 1 ? 's' : ''} plus 12 months of monthly photo updates.`,
+    corals: entitlement.coralFragmentsCount,
+    hasUpdates: entitlement.updatesEligible,
+    text: isFrame
+      ? `Adopts a full nursery spider-frame (${entitlement.coralFragmentsCount} fragments) tagged by our divers, plus 12 months of monthly photo updates.`
+      : entitlement.updatesEligible
+      ? `Sponsors ${entitlement.coralFragmentsCount} coral fragment${entitlement.coralFragmentsCount > 1 ? 's' : ''} plus 12 months of monthly photo updates.`
+      : `Sponsors ${entitlement.coralFragmentsCount} coral fragment at Pantai Pasir Besar with photogrammetric survival monitoring.`,
   };
 };
 
@@ -78,6 +75,9 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
   const [coralName, setCoralName] = useState<string>('');
   const [message, setMessage] = useState<string>('');
 
+  // Referral
+  const [referral, setReferral] = useState<string>('');
+
   // Donor
   const [donorName, setDonorName] = useState<string>('');
   const [donorEmail, setDonorEmail] = useState<string>('');
@@ -86,6 +86,16 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
   // Recipient (gift only)
   const [recipientName, setRecipientName] = useState<string>('');
   const [recipientEmail, setRecipientEmail] = useState<string>('');
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const refParam = params.get('referral') || params.get('ref') || params.get('ref_code');
+      if (refParam) {
+        setReferral(refParam.trim());
+      }
+    } catch {}
+  }, []);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -146,6 +156,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
           attributionPreference: attribution,
           message: message.trim(),
           coralName: coralName.trim(),
+          referral: referral.trim(),
           isGift,
           recipientName: isGift ? recipientName.trim() : '',
           recipientEmail: isGift ? recipientEmail.trim() : '',
@@ -416,6 +427,23 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
                   ))}
                 </div>
               </fieldset>
+
+              {/* Referral Textbox */}
+              <div className="mt-5 pt-5 border-t border-[#123047]/10">
+                <Field
+                  label="Referral code or club name"
+                  hint="Optional. If a Leo/Lion member, diver, or friend referred you, please enter their club name "
+                >
+                  <input
+                    type="text"
+                    maxLength={60}
+                    placeholder="e.g. UOWM Leo"
+                    value={referral}
+                    onChange={(e) => setReferral(e.target.value)}
+                    className={inputCls}
+                  />
+                </Field>
+              </div>
             </div>
           </div>
 
@@ -437,6 +465,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
                   {isGift
                     ? `For ${recipientName.trim() || 'your recipient'}, from ${tagFrom}`
                     : `Sponsored by ${tagFrom}`}
+                  {referral.trim() ? ` · Ref: ${referral.trim()}` : ''}
                 </p>
               </div>
 

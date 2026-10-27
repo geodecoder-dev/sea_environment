@@ -24,6 +24,12 @@ export function generateRandomSalt(): string {
   return bytesToHex(salt);
 }
 
+export function generateSecureToken(byteLength = 16): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
+
 /**
  * Derives a PBKDF2 hash using Web Crypto.
  * Defaults to SHA-256 (100,000 iterations), compatible with Cloudflare Workers.
@@ -63,7 +69,7 @@ export async function hashPassword(
 
 /**
  * Verifies a password against a stored hash.
- * Supports both modern SHA-256 (64 hex characters) and legacy/seed SHA-512 (128 hex characters).
+ * Supports modern SHA-256 (64 hex characters) and legacy SHA-512 (128 hex characters).
  */
 export async function verifyPassword(
   password: string,
@@ -146,14 +152,13 @@ export async function createToken(userId: string, secret?: string): Promise<stri
     console.error('[AUTH ERROR] SESSION_SECRET is missing or shorter than 32 characters.');
     throw new AuthenticationConfigError();
   }
-  const sessionSecret = secret;
   const timestamp = Date.now();
   const payload = `${userId}:${timestamp}`;
   const enc = new TextEncoder();
 
   const key = await crypto.subtle.importKey(
     'raw',
-    enc.encode(sessionSecret),
+    enc.encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
@@ -178,7 +183,6 @@ export async function verifyToken(token: string, secret?: string): Promise<strin
     console.error('[AUTH ERROR] SESSION_SECRET is missing or shorter than 32 characters.');
     throw new AuthenticationConfigError();
   }
-  const sessionSecret = secret;
 
   try {
     const decoded = atob(token);
@@ -200,7 +204,7 @@ export async function verifyToken(token: string, secret?: string): Promise<strin
 
     const key = await crypto.subtle.importKey(
       'raw',
-      enc.encode(sessionSecret),
+      enc.encode(secret),
       { name: 'HMAC', hash: 'SHA-256' },
       false,
       ['verify']
@@ -256,4 +260,56 @@ export function getAuthTokenFromRequest(request: Request): string | null {
   }
 
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Rate Limiting for Authentication (Sliding Window in Memory)
+// ---------------------------------------------------------------------------
+
+interface RateLimitRecord {
+  attempts: number[];
+  lockedUntil?: number;
+}
+
+const loginAttemptsByIp = new Map<string, RateLimitRecord>();
+
+export function checkLoginRateLimit(
+  ip: string,
+  maxAttempts = 5,
+  windowMs = 15 * 60 * 1000,
+  lockoutMs = 15 * 60 * 1000
+): { allowed: boolean; remainingAttempts: number; retryAfterSec?: number } {
+  const now = Date.now();
+  const record = loginAttemptsByIp.get(ip) || { attempts: [] };
+
+  if (record.lockedUntil && now < record.lockedUntil) {
+    const retryAfterSec = Math.ceil((record.lockedUntil - now) / 1000);
+    return { allowed: false, remainingAttempts: 0, retryAfterSec };
+  }
+
+  // Filter attempts within the sliding window
+  record.attempts = record.attempts.filter((time) => now - time < windowMs);
+
+  if (record.attempts.length >= maxAttempts) {
+    record.lockedUntil = now + lockoutMs;
+    loginAttemptsByIp.set(ip, record);
+    const retryAfterSec = Math.ceil(lockoutMs / 1000);
+    return { allowed: false, remainingAttempts: 0, retryAfterSec };
+  }
+
+  return {
+    allowed: true,
+    remainingAttempts: maxAttempts - record.attempts.length,
+  };
+}
+
+export function recordFailedLogin(ip: string): void {
+  const now = Date.now();
+  const record = loginAttemptsByIp.get(ip) || { attempts: [] };
+  record.attempts.push(now);
+  loginAttemptsByIp.set(ip, record);
+}
+
+export function resetLoginAttempts(ip: string): void {
+  loginAttemptsByIp.delete(ip);
 }

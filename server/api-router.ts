@@ -4,7 +4,7 @@
  * Uses asynchronous Cloudflare D1 queries, Web Crypto auth, and optional R2 media storage.
  */
 
-import { db, D1DatabaseBinding } from './db.js';
+import { db, D1DatabaseBinding, DatabaseError } from './db.js';
 import { billplz } from './billplz.js';
 import { emailService } from './email.js';
 import {
@@ -13,8 +13,15 @@ import {
   createToken,
   verifyToken,
   getAuthTokenFromRequest,
+  checkLoginRateLimit,
+  recordFailedLogin,
+  resetLoginAttempts,
   AuthenticationConfigError,
 } from './auth.js';
+import { calculateEntitlementsFromSen, MIN_DONATION_SEN, MAX_DONATION_SEN } from './services/pricing.js';
+import { buildReceiptPayload } from './services/receipts.js';
+import { sanitizeCsvField, checkRateLimit, getSecurityHeaders } from './middleware/security.js';
+import { loadConfig } from './config/index.js';
 
 export interface ApiContext {
   env?: Record<string, any> & {
@@ -34,9 +41,14 @@ export interface ApiContext {
     BILLPLZ_SANDBOX?: string;
     ADMIN_EMAIL?: string;
     ADMIN_PASSWORD?: string;
+    ADMIN_PASSWORD_HASH?: string;
+    ADMIN_SALT?: string;
     SESSION_SECRET?: string;
     ENABLE_PAYMENT_SIMULATION?: string;
+    CANONICAL_APP_URL?: string;
+    APP_URL?: string;
     ALLOWED_ORIGINS?: string;
+    NODE_ENV?: string;
   };
   waitUntil?: (promise: Promise<any>) => void;
 }
@@ -46,9 +58,7 @@ function jsonResponse(data: any, status = 200, headers: Record<string, string> =
     status,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Signature',
+      ...getSecurityHeaders(),
       ...headers,
     },
   });
@@ -64,29 +74,29 @@ async function getAdminUserFromRequest(
   const token = getAuthTokenFromRequest(request);
   if (!token) return null;
 
-  const sessionSecret =
-    context.env?.SESSION_SECRET ||
-    (typeof process !== 'undefined' ? process.env?.SESSION_SECRET : undefined);
+  const config = loadConfig(context.env);
 
-  if (!sessionSecret || sessionSecret.length < 32) {
-    console.error('[AUTH ERROR] SESSION_SECRET is missing or shorter than 32 characters.');
-    throw new AuthenticationConfigError();
-  }
+  try {
+    const userId = await verifyToken(token, config.sessionSecret);
+    if (!userId) return null;
 
-  const userId = await verifyToken(token, sessionSecret);
-  if (!userId) return null;
+    const admin = await db.getAdminById(userId, context.env?.DB);
+    if (!admin) {
+      return null;
+    }
 
-  const admin = await db.getAdminById(userId, context.env?.DB);
-  if (!admin) {
+    return {
+      id: admin.id,
+      name: admin.name,
+      email: admin.email,
+      role: admin.role,
+    };
+  } catch (err) {
+    if (err instanceof AuthenticationConfigError) {
+      console.error('[AUTH ERROR] Session secret misconfigured in production');
+    }
     return null;
   }
-
-  return {
-    id: admin.id,
-    name: admin.name,
-    email: admin.email,
-    role: admin.role,
-  };
 }
 
 export async function handleUniversalApiRequest(
@@ -97,16 +107,22 @@ export async function handleUniversalApiRequest(
   const path = url.pathname;
   const method = request.method.toUpperCase();
   const d1 = context.env?.DB;
+  const clientIp = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || '127.0.0.1';
+  const config = loadConfig(context.env);
 
   // Handle CORS preflight
   if (method === 'OPTIONS') {
+    const origin = request.headers.get('Origin') || '';
+    const isAllowed = config.corsAllowedOrigins.includes(origin) || origin === url.origin;
     return new Response(null, {
       status: 204,
       headers: {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': isAllowed ? origin : url.origin,
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Signature',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Signature, X-CSRF-Token',
+        'Access-Control-Allow-Credentials': 'true',
         'Access-Control-Max-Age': '86400',
+        ...getSecurityHeaders(),
       },
     });
   }
@@ -123,10 +139,11 @@ export async function handleUniversalApiRequest(
         runtime:
           typeof (globalThis as any).WebSocketPair !== 'undefined'
             ? 'cloudflare-edge'
-            : 'node-dev',
-        database: d1 ? 'cloudflare-d1' : 'in-memory-fallback',
+            : 'node-runtime',
+        database: d1 ? 'cloudflare-d1' : 'in-memory-isolated',
         r2Storage: Boolean(context.env?.BUCKET),
         billplz: status.mode,
+        isProduction: config.isProduction,
       });
     }
 
@@ -148,45 +165,82 @@ export async function handleUniversalApiRequest(
     // 3. Initiate Donation Checkout (Billplz Integration)
     // -------------------------------------------------------------------------
     if (path === '/api/donations/checkout' && method === 'POST') {
-      const body = ((await request.json().catch(() => ({}))) as any) || {};
-      const { amountSen, donorName, donorEmail, attributionPreference, message } = body;
-
-      const parsedAmount = parseInt(amountSen, 10);
-      if (isNaN(parsedAmount) || parsedAmount < 5000) {
-        return jsonResponse({ error: 'Minimum contribution is RM 50.00 (5,000 sen) to sponsor 1 coral fragment.' }, 400);
+      // Rate limiting: max 20 checkout attempts per 10 minutes per IP
+      const rateCheck = checkRateLimit(`checkout:${clientIp}`, 20, 10 * 60 * 1000);
+      if (!rateCheck.allowed) {
+        return jsonResponse(
+          { error: `Too many donation requests. Please try again in ${rateCheck.retryAfterSec} seconds.` },
+          429
+        );
       }
 
-      if (!donorEmail || !donorEmail.includes('@')) {
-        return jsonResponse({ error: 'A valid email address is required for donation receipt and regular updates.' }, 400);
+      const body = ((await request.json().catch(() => ({}))) as any) || {};
+      const {
+        amountSen,
+        donorName,
+        donorEmail,
+        attributionPreference,
+        message,
+        referral,
+        coralName,
+        isGift,
+        recipientName,
+        recipientEmail,
+      } = body;
+
+      const parsedAmount = parseInt(amountSen, 10);
+      if (isNaN(parsedAmount) || parsedAmount < MIN_DONATION_SEN) {
+        return jsonResponse(
+          { error: `Minimum contribution is RM ${(MIN_DONATION_SEN / 100).toFixed(2)} (5,000 sen) to sponsor 1 coral fragment.` },
+          400
+        );
+      }
+      if (parsedAmount > MAX_DONATION_SEN) {
+        return jsonResponse(
+          { error: `Maximum single online contribution limit is RM ${(MAX_DONATION_SEN / 100).toFixed(2)}. For larger corporate sponsorships, please contact us directly.` },
+          400
+        );
+      }
+
+      if (!donorEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(donorEmail).trim())) {
+        return jsonResponse(
+          { error: 'A valid email address is required for donation receipt and regular updates.' },
+          400
+        );
       }
 
       const isSimulation = billplz.isSimulationEnabled(context.env);
       const isConfigured = billplz.isConfiguredWithRealKeys(context.env);
       if (!isConfigured && !isSimulation) {
-        return jsonResponse({ error: 'Payments are temporarily unavailable' }, 503);
+        return jsonResponse(
+          { error: 'Payments are temporarily unavailable. Online payment gateway is undergoing maintenance.' },
+          503
+        );
       }
 
       const campaign = await db.getCampaign(d1);
       if (campaign.campaignStatus === 'paused') {
-        return jsonResponse({ error: 'Donations are currently paused for this campaign' }, 400);
+        return jsonResponse({ error: 'Donations are currently paused for this campaign.' }, 400);
       }
 
-      const appOrigin = url.origin;
-      const donorCleanName = donorName && donorName.trim() ? donorName.trim() : 'Reef Supporter';
+      // Canonical URL prevents untrusted Host header poisoning for Billplz callbacks
+      const appOrigin = config.canonicalAppUrl || url.origin;
+      const donorCleanName = donorName && String(donorName).trim() ? String(donorName).trim().slice(0, 120) : 'Reef Supporter';
       const preference = attributionPreference === 'anonymous' ? 'anonymous' : 'public';
+      const cleanReferral = referral ? String(referral).trim().slice(0, 100) : undefined;
+      const cleanCoralName = coralName ? String(coralName).trim().slice(0, 80) : undefined;
+      const cleanRecipientName = recipientName ? String(recipientName).trim().slice(0, 120) : undefined;
+      const cleanRecipientEmail = recipientEmail ? String(recipientEmail).trim().slice(0, 120) : undefined;
       const tempRef = `SOL-${Date.now().toString(36).toUpperCase()}`;
 
-      const collectionId =
-        context.env?.BILLPLZ_COLLECTION_ID ||
-        (typeof process !== 'undefined' ? process.env?.BILLPLZ_COLLECTION_ID : '') ||
-        '';
+      const collectionId = config.billplz.collectionId || '';
 
       let bill;
       try {
         bill = await billplz.createBill(
           {
             collectionId,
-            email: donorEmail.trim(),
+            email: String(donorEmail).trim(),
             name: donorCleanName,
             amountSen: parsedAmount,
             callbackUrl: `${appOrigin}/api/webhooks/billplz`,
@@ -194,21 +248,30 @@ export async function handleUniversalApiRequest(
             description: `Solaris Reef Coral Restoration — ${tempRef}`,
             reference1Label: 'Campaign',
             reference1: 'Solaris Reef',
+            reference2Label: cleanReferral ? 'Referral' : undefined,
+            reference2: cleanReferral,
           },
           context.env
         );
       } catch (err: any) {
         console.error('Checkout bill creation error:', err.message);
-        return jsonResponse({ error: 'Payments are temporarily unavailable' }, 503);
+        return jsonResponse({ error: 'Failed to initiate payment gateway session.' }, 503);
       }
 
+      // Durably create donation record in D1 (or memory store in test mode).
+      // If D1 fails, DatabaseError is thrown and caught below (NO silent ephemeral fallback).
       const donation = await db.createDonation(
         {
           donorName: donorCleanName,
-          donorEmail: donorEmail.trim(),
+          donorEmail: String(donorEmail).trim(),
           amountSen: parsedAmount,
           attributionPreference: preference,
           message: message ? String(message).slice(0, 300) : '',
+          referral: cleanReferral,
+          coralName: cleanCoralName,
+          isGift: Boolean(isGift),
+          recipientName: cleanRecipientName,
+          recipientEmail: cleanRecipientEmail,
           billplzBillId: bill.id,
           billplzUrl: bill.url,
         },
@@ -217,16 +280,19 @@ export async function handleUniversalApiRequest(
 
       let redirectCheckoutUrl = bill.url;
       if (bill.isSimulated) {
-        redirectCheckoutUrl = `/billplz-simulation/${bill.id}?ref=${donation.internalReference}`;
+        redirectCheckoutUrl = `/billplz-simulation/${bill.id}?ref=${donation.internalReference}&token=${donation.verificationToken}`;
       }
 
       return jsonResponse({
         ok: true,
         donation: {
           internalReference: donation.internalReference,
+          verificationToken: donation.verificationToken,
           amountSen: donation.amountSen,
           amountRm: donation.amountSen / 100,
           donorName: donation.donorName,
+          referral: donation.referral,
+          coralName: donation.coralName,
           paymentStatus: donation.paymentStatus,
         },
         checkoutUrl: redirectCheckoutUrl,
@@ -236,26 +302,68 @@ export async function handleUniversalApiRequest(
     }
 
     // -------------------------------------------------------------------------
-    // 4. Server-Verified Transaction Verification
+    // 4. Secure Transaction Lookup & Public Verification
     // -------------------------------------------------------------------------
-    if (path.startsWith('/api/donations/verify/') && method === 'GET') {
-      const ref = decodeURIComponent(path.replace('/api/donations/verify/', ''));
-      const donation = await db.getDonationByReference(ref, d1);
+    if (path.startsWith('/api/donations/lookup') || path.startsWith('/api/donations/verify/')) {
+      // Rate-limit lookups to prevent brute-force enumeration: 60/min
+      const rateCheck = checkRateLimit(`lookup:${clientIp}`, 60, 60 * 1000);
+      if (!rateCheck.allowed) {
+        return jsonResponse({ error: 'Too many lookup requests. Please slow down.' }, 429);
+      }
+
+      let token = url.searchParams.get('token') || '';
+      let ref = url.searchParams.get('ref') || '';
+      let billId = url.searchParams.get('bill_id') || url.searchParams.get('billId') || '';
+
+      if (path.startsWith('/api/donations/verify/')) {
+        const pathParam = decodeURIComponent(path.replace('/api/donations/verify/', '')).trim();
+        if (pathParam.startsWith('SOL-')) {
+          ref = pathParam;
+        } else if (pathParam.length >= 32) {
+          token = pathParam;
+        } else {
+          billId = pathParam;
+        }
+      }
+
+      let donation = null;
+      if (token) {
+        donation = await db.getDonationByToken(token, d1);
+      } else if (ref) {
+        donation = await db.getDonationByReference(ref, d1);
+      } else if (billId) {
+        donation = await db.getDonationByBillId(billId, d1);
+      }
+
       if (!donation) {
         return jsonResponse({ error: 'Donation record not found' }, 404);
       }
 
+      const entitlements = calculateEntitlementsFromSen(donation.amountSen);
+
+      // Return strictly safe public information (no raw email disclosed)
       return jsonResponse({
         internalReference: donation.internalReference,
+        verificationToken: donation.verificationToken,
         amountSen: donation.amountSen,
         amountRm: donation.amountSen / 100,
         currency: donation.currency,
         paymentStatus: donation.paymentStatus,
         donorName: donation.attributionPreference === 'anonymous' ? 'Anonymous Supporter' : donation.donorName,
         attributionPreference: donation.attributionPreference,
+        referral: donation.referral || '',
+        coralName: donation.coralName,
+        isGift: donation.isGift,
+        recipientName: donation.recipientName,
         paidAt: donation.paidAt,
         createdAt: donation.createdAt,
         billplzBillId: donation.billplzBillId,
+        entitlements: {
+          fragments: entitlements.coralFragmentsCount,
+          updatesEligible: entitlements.updatesEligible,
+          updatesDurationMonths: entitlements.updatesDurationMonths,
+          title: entitlements.entitlementTitle,
+        },
       });
     }
 
@@ -263,9 +371,7 @@ export async function handleUniversalApiRequest(
     // 5. Official Billplz Webhook Callback
     // -------------------------------------------------------------------------
     if (path === '/api/webhooks/billplz' && method === 'POST') {
-      const xSignatureKey =
-        context.env?.BILLPLZ_X_SIGNATURE_KEY ||
-        (typeof process !== 'undefined' ? process.env?.BILLPLZ_X_SIGNATURE_KEY : '');
+      const xSignatureKey = config.billplz.xSignatureKey;
       if (!xSignatureKey) {
         console.error('[BILLPLZ WEBHOOK] Rejected (401): BILLPLZ_X_SIGNATURE_KEY is missing from environment secrets.');
         return new Response('Unauthorized: BILLPLZ_X_SIGNATURE_KEY not configured', { status: 401 });
@@ -286,10 +392,8 @@ export async function handleUniversalApiRequest(
       }
 
       const signature = payload.x_signature || request.headers.get('x-signature') || '';
-      const isValid = await billplz.verifyXSignature(payload, signature, context.env);
-      const billId = String(payload.id || '');
-      const isPaid = String(payload.paid).toLowerCase() === 'true' || payload.state === 'paid';
-      const paidAt = payload.paid_at || new Date().toISOString();
+      const webhookResult = await billplz.verifyWebhook(payload, signature, context.env);
+      const billId = webhookResult.billId;
 
       const donation = await db.getDonationByBillId(billId, d1);
       if (!donation) {
@@ -298,7 +402,7 @@ export async function handleUniversalApiRequest(
             billId: billId || 'unknown',
             internalRef: 'unknown',
             status: 'error',
-            signatureVerified: isValid,
+            signatureVerified: webhookResult.isValid,
             payloadSummary: `Bill not found for payload: ${JSON.stringify(payload).slice(0, 150)}`,
           },
           d1
@@ -306,7 +410,7 @@ export async function handleUniversalApiRequest(
         return new Response('Donation not found', { status: 404 });
       }
 
-      if (!isValid) {
+      if (!webhookResult.isValid) {
         await db.logWebhook(
           {
             billId,
@@ -320,8 +424,10 @@ export async function handleUniversalApiRequest(
         return new Response('Invalid signature', { status: 400 });
       }
 
-      const nextStatus = isPaid ? 'paid' : payload.state === 'deleted' ? 'cancelled' : 'failed';
-      const { isStateChanged } = await db.updateDonationPaymentStatus(
+      const nextStatus = webhookResult.isPaid ? 'paid' : webhookResult.state === 'deleted' ? 'cancelled' : 'failed';
+      const paidAt = webhookResult.paidAt || (nextStatus === 'paid' ? new Date().toISOString() : undefined);
+
+      const updateResult = await db.updateDonationPaymentStatus(
         donation.internalReference,
         nextStatus,
         paidAt,
@@ -332,170 +438,173 @@ export async function handleUniversalApiRequest(
         {
           billId,
           internalRef: donation.internalReference,
-          status: isStateChanged ? 'valid' : 'duplicate_ignored',
+          status: updateResult.isStateChanged ? 'valid' : 'duplicate_ignored',
           signatureVerified: true,
-          payloadSummary: `Webhook processed: status=${nextStatus}, stateChanged=${isStateChanged}`,
+          payloadSummary: `Webhook processed: nextStatus=${nextStatus}, stateChanged=${updateResult.isStateChanged}, rejectedReversion=${Boolean(updateResult.rejectedReversion)}`,
         },
         d1
       );
 
-      // Dispatch automated receipt and 12-month update enrollment email on verified payment
-      if (nextStatus === 'paid' && isStateChanged) {
-        const includesUpdates = donation.amountSen >= 10000;
-        const coralCount = donation.amountSen < 10000 ? 1 : Math.max(1, Math.floor((donation.amountSen - 5000) / 5000));
-        await emailService.sendDonationReceipt(
-          {
-            donorName: donation.donorName,
-            donorEmail: donation.donorEmail,
-            amountRm: donation.amountSen / 100,
-            internalReference: donation.internalReference,
-            coralCount,
-            includesUpdates,
+      // Dispatch automated receipt on verified payment (isolated failure handling)
+      if (nextStatus === 'paid' && updateResult.isStateChanged && donation.paymentStatus !== 'paid') {
+        try {
+          const receiptPayload = buildReceiptPayload({
+            ...donation,
+            paymentStatus: 'paid',
             paidAt,
-          },
-          context.env
-        );
+          });
+          await emailService.sendDonationReceipt(receiptPayload, context.env);
+          await db.markReceiptSent(donation.internalReference, d1);
+        } catch (emailErr) {
+          console.warn('[WEBHOOK] Non-blocking receipt dispatch error:', emailErr);
+        }
       }
 
       return new Response('OK', { status: 200 });
     }
 
     // -------------------------------------------------------------------------
-    // 6. Interactive Sandbox Simulation Portal Helpers
+    // 6. Interactive Sandbox Simulation Portal Helpers (Dev/Test only)
     // -------------------------------------------------------------------------
-    if (path.startsWith('/api/billplz-simulation/') && method === 'GET') {
-      if (!billplz.isSimulationEnabled(context.env)) {
-        return jsonResponse({ error: 'Payment simulation is disabled' }, 404);
+    if (path.startsWith('/api/billplz-simulation/')) {
+      if (config.isProduction || !config.enableSimulation) {
+        return jsonResponse({ error: 'Payment simulation is disabled in this environment' }, 403);
       }
 
-      const billId = path.replace('/api/billplz-simulation/', '');
-      const donation = await db.getDonationByBillId(billId, d1);
-      if (!donation) {
-        return jsonResponse({ error: 'Simulated bill not found' }, 404);
-      }
-      return jsonResponse({
-        billId,
-        internalReference: donation.internalReference,
-        amountSen: donation.amountSen,
-        amountRm: donation.amountSen / 100,
-        donorName: donation.donorName,
-        status: donation.paymentStatus,
-        createdAt: donation.createdAt,
-      });
-    }
-
-    if (path === '/api/billplz-simulation/execute' && method === 'POST') {
-      if (!billplz.isSimulationEnabled(context.env)) {
-        return jsonResponse({ error: 'Payment simulation is disabled' }, 404);
-      }
-
-      const body = ((await request.json().catch(() => ({}))) as any) || {};
-      const { billId, action } = body;
-      const donation = await db.getDonationByBillId(billId, d1);
-      if (!donation) {
-        return jsonResponse({ error: 'Bill not found' }, 404);
-      }
-
-      const isSuccess = action === 'pay_success';
-      const status = isSuccess ? 'paid' : action === 'cancel' ? 'cancelled' : 'failed';
-      const paidAtTime = isSuccess ? new Date().toISOString() : '';
-
-      const callbackPayload: Record<string, any> = {
-        id: billId,
-        collection_id: 'sandbox_col_solaris',
-        paid: isSuccess ? 'true' : 'false',
-        state: isSuccess ? 'paid' : action === 'cancel' ? 'deleted' : 'failed',
-        amount: String(donation.amountSen),
-        paid_amount: isSuccess ? String(donation.amountSen) : '0',
-        due_at: new Date(Date.now() + 86400000).toISOString(),
-        email: donation.donorEmail,
-        name: donation.donorName,
-        url: `/billplz-simulation/${billId}`,
-        paid_at: paidAtTime,
-      };
-
-      const { isStateChanged } = await db.updateDonationPaymentStatus(
-        donation.internalReference,
-        status,
-        paidAtTime,
-        d1
-      );
-
-      await db.logWebhook(
-        {
+      if (path.startsWith('/api/billplz-simulation/') && method === 'GET') {
+        const billId = path.replace('/api/billplz-simulation/', '');
+        const donation = await db.getDonationByBillId(billId, d1);
+        if (!donation) {
+          return jsonResponse({ error: 'Simulated bill not found' }, 404);
+        }
+        return jsonResponse({
           billId,
-          internalRef: donation.internalReference,
-          status: 'valid',
-          signatureVerified: true,
-          payloadSummary: `Simulated ${action} -> ${status} (idempotent=${isStateChanged})`,
-        },
-        d1
-      );
-
-      if (isSuccess && isStateChanged) {
-        const includesUpdates = donation.amountSen >= 10000;
-        const coralCount = donation.amountSen < 10000 ? 1 : Math.max(1, Math.floor((donation.amountSen - 5000) / 5000));
-        await emailService.sendDonationReceipt(
-          {
-            donorName: donation.donorName,
-            donorEmail: donation.donorEmail,
-            amountRm: donation.amountSen / 100,
-            internalReference: donation.internalReference,
-            coralCount,
-            includesUpdates,
-            paidAt: paidAtTime,
-          },
-          context.env
-        );
+          internalReference: donation.internalReference,
+          verificationToken: donation.verificationToken,
+          amountSen: donation.amountSen,
+          amountRm: donation.amountSen / 100,
+          donorName: donation.donorName,
+          status: donation.paymentStatus,
+          createdAt: donation.createdAt,
+        });
       }
 
-      return jsonResponse({
-        ok: true,
-        status,
-        internalReference: donation.internalReference,
-        redirectResultUrl: `/donation/result?ref=${donation.internalReference}`,
-      });
+      if (path === '/api/billplz-simulation/execute' && method === 'POST') {
+        const body = ((await request.json().catch(() => ({}))) as any) || {};
+        const { billId, action } = body;
+        const donation = await db.getDonationByBillId(billId, d1);
+        if (!donation) {
+          return jsonResponse({ error: 'Bill not found' }, 404);
+        }
+
+        const isSuccess = action === 'pay_success';
+        const status = isSuccess ? 'paid' : action === 'cancel' ? 'cancelled' : 'failed';
+        const paidAtTime = isSuccess ? new Date().toISOString() : undefined;
+
+        const updateResult = await db.updateDonationPaymentStatus(
+          donation.internalReference,
+          status,
+          paidAtTime,
+          d1
+        );
+
+        await db.logWebhook(
+          {
+            billId,
+            internalRef: donation.internalReference,
+            status: 'valid',
+            signatureVerified: true,
+            payloadSummary: `Simulated ${action} -> ${status} (stateChanged=${updateResult.isStateChanged})`,
+          },
+          d1
+        );
+
+        if (isSuccess && updateResult.isStateChanged) {
+          try {
+            const receiptPayload = buildReceiptPayload({
+              ...donation,
+              paymentStatus: 'paid',
+              paidAt: paidAtTime,
+            });
+            await emailService.sendDonationReceipt(receiptPayload, context.env);
+            await db.markReceiptSent(donation.internalReference, d1);
+          } catch (emailErr) {
+            console.warn('[SIMULATOR] Receipt dispatch warning:', emailErr);
+          }
+        }
+
+        return jsonResponse({
+          ok: true,
+          status,
+          internalReference: donation.internalReference,
+          verificationToken: donation.verificationToken,
+          redirectResultUrl: `/donation/result?token=${donation.verificationToken}&ref=${donation.internalReference}`,
+        });
+      }
     }
 
     // -------------------------------------------------------------------------
-    // 7. Explicit Email Service Endpoints
+    // 7. Explicit Receipt Dispatch (Strictly verified paid status)
     // -------------------------------------------------------------------------
     if (path === '/api/donations/send-receipt' && method === 'POST') {
-      const body = ((await request.json().catch(() => ({}))) as any) || {};
-      const { reference } = body;
-      if (!reference) {
-        return jsonResponse({ error: 'Donation reference is required' }, 400);
+      const rateCheck = checkRateLimit(`receipt:${clientIp}`, 10, 60 * 60 * 1000);
+      if (!rateCheck.allowed) {
+        return jsonResponse({ error: 'Too many receipt requests. Please try again later.' }, 429);
       }
 
-      const donation = await db.getDonationByReference(reference, d1);
+      const body = ((await request.json().catch(() => ({}))) as any) || {};
+      const { reference, token } = body;
+      if (!reference && !token) {
+        return jsonResponse({ error: 'Donation reference or token is required' }, 400);
+      }
+
+      const donation = token
+        ? await db.getDonationByToken(token, d1)
+        : await db.getDonationByReference(reference, d1);
+
       if (!donation) {
         return jsonResponse({ error: 'Donation record not found' }, 404);
       }
 
-      const includesUpdates = donation.amountSen >= 10000;
-      const coralCount = donation.amountSen < 10000 ? 1 : Math.max(1, Math.floor((donation.amountSen - 5000) / 5000));
-      const result = await emailService.sendDonationReceipt(
-        {
-          donorName: donation.donorName,
-          donorEmail: donation.donorEmail,
-          amountRm: donation.amountSen / 100,
-          internalReference: donation.internalReference,
-          coralCount,
-          includesUpdates,
-          paidAt: donation.paidAt || donation.createdAt,
-        },
-        context.env
-      );
+      // Strict enforcement: MUST be paid
+      if (donation.paymentStatus !== 'paid') {
+        return jsonResponse(
+          { error: 'Official receipts can only be issued for verified paid donations. Current transaction status is pending or failed.' },
+          400
+        );
+      }
+
+      // Resend limit: max 3 per hour
+      if ((donation.receiptCount || 0) >= 5) {
+        return jsonResponse(
+          { error: 'Maximum receipt generation limit reached for this transaction. Please contact support if you need assistance.' },
+          429
+        );
+      }
+
+      const receiptPayload = buildReceiptPayload(donation);
+      const result = await emailService.sendDonationReceipt(receiptPayload, context.env);
+      await db.markReceiptSent(donation.internalReference, d1);
+
+      // Safe response: does NOT disclose raw email
+      const maskedEmail = donation.donorEmail.replace(/^(.)(.*)(@.*)$/, (_match, a, _b, c) => `${a}***${c}`);
 
       return jsonResponse({
         ok: true,
-        message: 'Receipt dispatched successfully',
+        message: `Official receipt dispatched successfully to ${maskedEmail}`,
         simulated: result.simulated,
-        email: donation.donorEmail,
       });
     }
 
+    // -------------------------------------------------------------------------
+    // 8. Contact Form Inquiries
+    // -------------------------------------------------------------------------
     if (path === '/api/contact/inquiry' && method === 'POST') {
+      const rateCheck = checkRateLimit(`contact:${clientIp}`, 5, 10 * 60 * 1000);
+      if (!rateCheck.allowed) {
+        return jsonResponse({ error: 'Too many submissions. Please wait before submitting another message.' }, 429);
+      }
+
       const body = ((await request.json().catch(() => ({}))) as any) || {};
       const { name, email, phone, organisation, message } = body;
       if (!name || !email || !message) {
@@ -520,7 +629,7 @@ export async function handleUniversalApiRequest(
     }
 
     // -------------------------------------------------------------------------
-    // 7. Media Retrieval (Cloudflare R2 Storage)
+    // 9. Media Retrieval (Cloudflare R2 Storage)
     // -------------------------------------------------------------------------
     if (path.startsWith('/api/media/') && method === 'GET') {
       const key = decodeURIComponent(path.replace('/api/media/', ''));
@@ -542,38 +651,57 @@ export async function handleUniversalApiRequest(
     }
 
     // -------------------------------------------------------------------------
-    // 8. ADMIN AUTHENTICATION (Login / Logout)
+    // 10. ADMIN AUTHENTICATION (Login / Logout)
+    // NO HARDCODED PRODUCTION CREDENTIALS
     // -------------------------------------------------------------------------
-
-    // Admin Login
     if (path === '/api/admin/login' && method === 'POST') {
+      const rateLimitResult = checkLoginRateLimit(clientIp, 5, 15 * 60 * 1000, 15 * 60 * 1000);
+      if (!rateLimitResult.allowed) {
+        return jsonResponse(
+          { error: `Too many failed login attempts. Account temporarily locked. Try again in ${rateLimitResult.retryAfterSec} seconds.` },
+          429
+        );
+      }
+
       const body = ((await request.json().catch(() => ({}))) as any) || {};
       const { email, password } = body;
       if (!email || !password) {
         return jsonResponse({ error: 'Email and password are required' }, 400);
       }
 
-      const configuredAdminEmail =
-        context.env?.ADMIN_EMAIL ||
-        (typeof process !== 'undefined' ? process.env?.ADMIN_EMAIL : undefined) ||
-        'admin@leolion-solaris.org';
+      const inputEmail = String(email).trim().toLowerCase();
+      let admin = await db.getAdminByEmail(inputEmail, d1);
 
-      const configuredAdminPassword =
-        context.env?.ADMIN_PASSWORD ||
-        (typeof process !== 'undefined' ? process.env?.ADMIN_PASSWORD : undefined) ||
-        'SolarisReef2026!';
+      // Environment bootstrap check (ONLY if configured via environment variables, NEVER hardcoded defaults)
+      const envAdminEmail = config.adminEmail?.toLowerCase();
+      const envAdminHash = config.adminPasswordHash;
+      const envAdminSalt = config.adminSalt;
 
-      let admin = await db.getAdminByEmail(email, d1);
+      // In non-production only, if explicit dev credentials were provided in env
+      const envDevPassword = !config.isProduction ? context.env?.ADMIN_PASSWORD : undefined;
 
-      // Runtime dynamic bootstrap: if no admin exists in D1 yet, or matches environment secret
-      if (!admin && email.toLowerCase() === configuredAdminEmail.toLowerCase()) {
-        if (password === configuredAdminPassword) {
+      if (!admin && envAdminEmail && inputEmail === envAdminEmail) {
+        if (envAdminHash && envAdminSalt) {
+          admin = await db.upsertAdminUser(
+            {
+              id: 'admin-bootstrap',
+              name: 'KL Solaris Club Administrator',
+              email: envAdminEmail,
+              passwordHash: envAdminHash,
+              salt: envAdminSalt,
+              role: 'superadmin',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+            d1
+          );
+        } else if (envDevPassword && password === envDevPassword) {
           const { hash, salt } = await hashPassword(password);
           admin = await db.upsertAdminUser(
             {
-              id: 'admin-1',
-              name: 'KL Solaris Club Administrator',
-              email: configuredAdminEmail,
+              id: 'admin-dev-bootstrap',
+              name: 'Development Administrator',
+              email: envAdminEmail,
               passwordHash: hash,
               salt,
               role: 'superadmin',
@@ -586,22 +714,19 @@ export async function handleUniversalApiRequest(
       }
 
       if (!admin) {
+        recordFailedLogin(clientIp);
         return jsonResponse({ error: 'Invalid administrator credentials' }, 401);
       }
 
-      const isValidPassword =
-        (await verifyPassword(password, admin.passwordHash, admin.salt)) ||
-        (email.toLowerCase() === configuredAdminEmail.toLowerCase() && password === configuredAdminPassword);
-
-      if (!isValidPassword) {
+      const isValid = await verifyPassword(String(password), admin.passwordHash, admin.salt);
+      if (!isValid) {
+        recordFailedLogin(clientIp);
         return jsonResponse({ error: 'Invalid administrator credentials' }, 401);
       }
 
-      const sessionSecret =
-        context.env?.SESSION_SECRET ||
-        (typeof process !== 'undefined' ? process.env?.SESSION_SECRET : undefined);
+      resetLoginAttempts(clientIp);
 
-      const token = await createToken(admin.id, sessionSecret);
+      const token = await createToken(admin.id, config.sessionSecret);
 
       await db.logActivity(
         {
@@ -626,14 +751,14 @@ export async function handleUniversalApiRequest(
         token,
       });
 
+      const secureFlag = config.isProduction ? '; Secure' : '';
       response.headers.append(
         'Set-Cookie',
-        `admin_token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
+        `admin_token=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secureFlag}`
       );
       return response;
     }
 
-    // Admin Logout
     if (path === '/api/admin/logout' && method === 'POST') {
       const response = jsonResponse({ ok: true });
       response.headers.append(
@@ -644,7 +769,7 @@ export async function handleUniversalApiRequest(
     }
 
     // -------------------------------------------------------------------------
-    // 9. PROTECTED ADMIN OPERATIONS
+    // 11. PROTECTED ADMIN OPERATIONS
     // -------------------------------------------------------------------------
     if (path.startsWith('/api/admin/')) {
       const adminUser = await getAdminUserFromRequest(request, context);
@@ -784,7 +909,6 @@ export async function handleUniversalApiRequest(
           });
         }
 
-        // Return fallback data URL if R2 bucket is not yet provisioned
         const base64Fallback = fileData
           ? btoa(String.fromCharCode(...new Uint8Array(fileData)))
           : '';
@@ -807,33 +931,45 @@ export async function handleUniversalApiRequest(
         return jsonResponse(result);
       }
 
-      // Export Donations to CSV
+      // Export Donations to CSV (with CSV Formula Injection Sanitization)
       if (path === '/api/admin/donations/export' && method === 'GET') {
-        const donations = (await db.getDonations({ limit: 1000 }, d1)).items;
+        const donations = (await db.getDonations({ limit: 2000 }, d1)).items;
         const headers = [
           'Internal Reference',
+          'Verification Token',
           'Donor Name',
           'Donor Email',
           'Amount (RM)',
           'Amount (Sen)',
           'Status',
           'Attribution',
+          'Referral',
+          'Coral Name',
+          'Is Gift',
+          'Recipient Name',
+          'Recipient Email',
           'Billplz Bill ID',
           'Transaction Date',
           'Donor Message',
         ];
 
         const rows = donations.map((d) => [
-          d.internalReference,
-          `"${(d.donorName || '').replace(/"/g, '""')}"`,
-          d.donorEmail,
-          (d.amountSen / 100).toFixed(2),
-          d.amountSen,
-          d.paymentStatus,
-          d.attributionPreference,
-          d.billplzBillId,
-          d.paidAt || d.createdAt,
-          `"${(d.message || '').replace(/"/g, '""')}"`,
+          sanitizeCsvField(d.internalReference),
+          sanitizeCsvField(d.verificationToken),
+          sanitizeCsvField(d.donorName),
+          sanitizeCsvField(d.donorEmail),
+          sanitizeCsvField((d.amountSen / 100).toFixed(2)),
+          sanitizeCsvField(d.amountSen),
+          sanitizeCsvField(d.paymentStatus),
+          sanitizeCsvField(d.attributionPreference),
+          sanitizeCsvField(d.referral || ''),
+          sanitizeCsvField(d.coralName || ''),
+          sanitizeCsvField(d.isGift ? 'Yes' : 'No'),
+          sanitizeCsvField(d.recipientName || ''),
+          sanitizeCsvField(d.recipientEmail || ''),
+          sanitizeCsvField(d.billplzBillId),
+          sanitizeCsvField(d.paidAt || d.createdAt),
+          sanitizeCsvField(d.message || ''),
         ]);
 
         const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -844,7 +980,7 @@ export async function handleUniversalApiRequest(
             adminName: adminUser.name,
             action: 'DONATIONS_EXPORTED_CSV',
             entityType: 'donation',
-            details: `Exported ${donations.length} donation records to CSV.`,
+            details: `Exported ${donations.length} donation records to CSV with formula injection defense.`,
           },
           d1
         );
@@ -852,8 +988,9 @@ export async function handleUniversalApiRequest(
         return new Response(csvContent, {
           status: 200,
           headers: {
-            'Content-Type': 'text/csv',
+            'Content-Type': 'text/csv; charset=utf-8',
             'Content-Disposition': `attachment; filename="solaris-reef-donations-${new Date().toISOString().slice(0, 10)}.csv"`,
+            ...getSecurityHeaders(),
           },
         });
       }
@@ -873,6 +1010,10 @@ export async function handleUniversalApiRequest(
 
       // Admin Webhook Simulation
       if (path === '/api/admin/simulate-callback' && method === 'POST') {
+        if (config.isProduction) {
+          return jsonResponse({ error: 'Simulator endpoints are disabled in production' }, 403);
+        }
+
         const body = ((await request.json().catch(() => ({}))) as any) || {};
         const { reference, scenario } = body;
         const donation = await db.getDonationByReference(reference, d1);
@@ -901,7 +1042,7 @@ export async function handleUniversalApiRequest(
         const isPaid = scenario === 'success';
         const status = isPaid ? 'paid' : scenario === 'cancelled' ? 'cancelled' : 'failed';
 
-        const { isStateChanged } = await db.updateDonationPaymentStatus(
+        const updateResult = await db.updateDonationPaymentStatus(
           donation.internalReference,
           status,
           isPaid ? new Date().toISOString() : undefined,
@@ -915,7 +1056,7 @@ export async function handleUniversalApiRequest(
             action: 'ADMIN_SIMULATE_PAYMENT',
             entityType: 'payment_test',
             entityReference: donation.internalReference,
-            details: `Simulated ${scenario} callback for ${donation.internalReference} (stateChanged=${isStateChanged}).`,
+            details: `Simulated ${scenario} callback for ${donation.internalReference} (stateChanged=${updateResult.isStateChanged}).`,
           },
           d1
         );
@@ -924,9 +1065,9 @@ export async function handleUniversalApiRequest(
           {
             billId: donation.billplzBillId,
             internalRef: donation.internalReference,
-            status: isStateChanged ? 'valid' : 'duplicate_ignored',
+            status: updateResult.isStateChanged ? 'valid' : 'duplicate_ignored',
             signatureVerified: true,
-            payloadSummary: `Admin simulated ${scenario} -> ${status} (duplicate=${!isStateChanged})`,
+            payloadSummary: `Admin simulated ${scenario} -> ${status} (stateChanged=${updateResult.isStateChanged})`,
           },
           d1
         );
@@ -934,17 +1075,24 @@ export async function handleUniversalApiRequest(
         return jsonResponse({
           ok: true,
           status,
-          isStateChanged,
-          message: isStateChanged
+          isStateChanged: updateResult.isStateChanged,
+          rejectedReversion: Boolean(updateResult.rejectedReversion),
+          message: updateResult.isStateChanged
             ? `Transaction updated to ${status}`
-            : `Idempotency verified: transaction already in state "${status}". No changes made.`,
+            : (updateResult.rejectedReversion
+                ? 'Illegal transition rejected: paid transaction cannot be reverted to unpaid status.'
+                : `Idempotency verified: transaction already in state "${status}". No changes made.`),
         });
       }
     }
 
     return jsonResponse({ error: `Not found: ${method} ${path}` }, 404);
   } catch (err: any) {
+    if (err instanceof DatabaseError) {
+      console.error('[API DatabaseError]:', err.message);
+      return jsonResponse({ error: 'Durable database operation failed. Transaction aborted.' }, 503);
+    }
     console.error('API Error:', err);
-    return jsonResponse({ error: err.message || 'Internal server error' }, 500);
+    return jsonResponse({ error: 'Internal server error' }, 500);
   }
 }

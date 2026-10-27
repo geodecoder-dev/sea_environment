@@ -1,7 +1,9 @@
 /**
  * Database Layer for Solaris Reef Campaign Hub
- * Supports Cloudflare D1 (Edge SQL) with zero Node.js filesystem dependencies.
- * Provides an asynchronous interface and in-memory store for development/fallback.
+ * Supports Cloudflare D1 (Edge SQL) with strict durable persistence semantics:
+ * - When D1 is present, errors are thrown (NEVER swallowed into memory fallback).
+ * - In-memory adapter is preserved strictly for local development and unit tests.
+ * - Enforces atomic conditional state transitions (e.g. pending -> paid).
  */
 
 import {
@@ -15,6 +17,14 @@ import {
   PaymentStatus,
   AttributionPreference,
 } from './types.js';
+import { generateSecureToken } from './auth.js';
+
+export class DatabaseError extends Error {
+  constructor(message: string, public cause?: unknown) {
+    super(`[DatabaseError] ${message}`);
+    this.name = 'DatabaseError';
+  }
+}
 
 export type D1PreparedStatement = {
   bind: (...params: any[]) => D1PreparedStatement;
@@ -47,7 +57,7 @@ function createDefaultSeed(): DatabaseSchema {
     slug: 'solaris-reef',
     description:
       'In scientific partnership with Coralku and local marine researchers, Leo-Lion Club of KL Solaris accelerates resilience-based reef restoration at Pulau Lang Tengah and Peninsular marine parks. Utilizing Coral Clips technology, deep-water nurseries, and Project ASSIST super-corals, we restore depleted reefs into self-sustaining, naturally spawning ecosystems.',
-    fundraisingTargetSen: 500000, // RM 50,000.00
+    fundraisingTargetSen: 5000000, // RM 50,000.00
     coralPlantingTarget: 250,
     verifiedCoralPlantingCount: 0,
     volunteerCount: 0,
@@ -58,13 +68,10 @@ function createDefaultSeed(): DatabaseSchema {
     updatedAt: '2026-10-19T08:30:00.000Z',
   };
 
-  const initialUpdates: CampaignUpdate[] = [];
-  const initialDonations: Donation[] = [];
-
   return {
     campaign: initialCampaign,
-    updates: initialUpdates,
-    donations: initialDonations,
+    updates: [],
+    donations: [],
     admins: [],
     activities: [],
     webhookLogs: [],
@@ -78,8 +85,13 @@ export class Database {
     this.memData = createDefaultSeed();
   }
 
+  // Helper for test resets
+  public resetMemoryData(): void {
+    this.memData = createDefaultSeed();
+  }
+
   // ---------------------------------------------------------------------------
-  // CAMPAIGN METHODS (D1 / In-Memory)
+  // CAMPAIGN METHODS
   // ---------------------------------------------------------------------------
 
   public async getCampaign(d1?: D1DatabaseBinding) {
@@ -106,7 +118,7 @@ export class Database {
           try {
             milestones = JSON.parse(campaignRow.milestones_json || '[]');
           } catch {
-            milestones = this.memData.campaign.milestones;
+            milestones = [];
           }
 
           return {
@@ -131,11 +143,12 @@ export class Database {
           };
         }
       } catch (err) {
-        console.warn('D1 getCampaign query fallback to memory:', err);
+        console.error('[DB] D1 getCampaign error:', err);
+        throw new DatabaseError('Failed to fetch campaign record from database', err);
       }
     }
 
-    // Fallback in-memory
+    // In-memory mode (development/testing)
     const paidDonations = this.memData.donations.filter((d) => d.paymentStatus === 'paid');
     const totalRaisedSen = paidDonations.reduce((sum, d) => sum + d.amountSen, 0);
     const donorCount = paidDonations.length;
@@ -202,7 +215,8 @@ export class Database {
 
         return this.getCampaign(d1);
       } catch (err) {
-        console.warn('D1 updateCampaign error, applying to memory:', err);
+        console.error('[DB] D1 updateCampaign error:', err);
+        throw new DatabaseError('Failed to update campaign in database', err);
       }
     }
 
@@ -228,7 +242,7 @@ export class Database {
   }
 
   // ---------------------------------------------------------------------------
-  // CAMPAIGN UPDATES METHODS (D1 / In-Memory)
+  // CAMPAIGN UPDATES METHODS
   // ---------------------------------------------------------------------------
 
   public async getPublicUpdates(d1?: D1DatabaseBinding): Promise<CampaignUpdate[]> {
@@ -254,7 +268,8 @@ export class Database {
           }));
         }
       } catch (err) {
-        console.warn('D1 getPublicUpdates error, falling back to memory:', err);
+        console.error('[DB] D1 getPublicUpdates error:', err);
+        throw new DatabaseError('Failed to fetch published updates from database', err);
       }
     }
 
@@ -284,7 +299,8 @@ export class Database {
           }));
         }
       } catch (err) {
-        console.warn('D1 getAllUpdates error, falling back to memory:', err);
+        console.error('[DB] D1 getAllUpdates error:', err);
+        throw new DatabaseError('Failed to fetch updates from database', err);
       }
     }
 
@@ -329,7 +345,8 @@ export class Database {
           )
           .run();
       } catch (err) {
-        console.warn('D1 createUpdate error:', err);
+        console.error('[DB] D1 createUpdate error:', err);
+        throw new DatabaseError('Failed to insert campaign update into database', err);
       }
     }
 
@@ -413,8 +430,10 @@ export class Database {
 
           return merged;
         }
+        return null;
       } catch (err) {
-        console.warn('D1 updateUpdate error:', err);
+        console.error('[DB] D1 updateUpdate error:', err);
+        throw new DatabaseError('Failed to update campaign update in database', err);
       }
     }
 
@@ -451,7 +470,8 @@ export class Database {
       try {
         await d1.prepare('DELETE FROM campaign_updates WHERE id = ?').bind(id).run();
       } catch (err) {
-        console.warn('D1 deleteUpdate error:', err);
+        console.error('[DB] D1 deleteUpdate error:', err);
+        throw new DatabaseError('Failed to delete campaign update from database', err);
       }
     }
 
@@ -474,7 +494,7 @@ export class Database {
   }
 
   // ---------------------------------------------------------------------------
-  // DONATIONS METHODS (D1 / In-Memory)
+  // DONATIONS METHODS
   // ---------------------------------------------------------------------------
 
   public async createDonation(
@@ -484,28 +504,43 @@ export class Database {
       amountSen: number;
       attributionPreference: AttributionPreference;
       message?: string;
+      referral?: string;
+      coralName?: string;
+      isGift?: boolean;
+      recipientName?: string;
+      recipientEmail?: string;
       billplzBillId: string;
       billplzUrl?: string;
     },
     d1?: D1DatabaseBinding
   ): Promise<Donation> {
+    // Reference: human-readable receipt number
     const internalReference = `SOL-${new Date().toISOString().slice(0, 7).replace('-', '')}-${generateRandomHex(2).toUpperCase()}`;
+    // 128-bit cryptographically secure opaque token for public lookup & verification
+    const verificationToken = generateSecureToken(16);
     const id = `don-${generateRandomHex(6)}`;
     const now = new Date().toISOString();
 
     const newDonation: Donation = {
       id,
       internalReference,
+      verificationToken,
       campaignId: 'solaris-reef-2026',
       donorName: data.donorName || 'Generous Supporter',
       donorEmail: data.donorEmail,
       amountSen: Math.round(data.amountSen),
       currency: 'MYR',
       attributionPreference: data.attributionPreference,
-      message: data.message || '',
+      message: data.message ? data.message.trim() : '',
+      referral: data.referral ? data.referral.trim() : '',
+      coralName: data.coralName ? data.coralName.trim() : undefined,
+      isGift: Boolean(data.isGift),
+      recipientName: data.recipientName ? data.recipientName.trim() : undefined,
+      recipientEmail: data.recipientEmail ? data.recipientEmail.trim() : undefined,
       billplzBillId: data.billplzBillId,
       billplzUrl: data.billplzUrl,
       paymentStatus: 'pending',
+      receiptCount: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -515,12 +550,13 @@ export class Database {
         await d1
           .prepare(
             `INSERT INTO donations 
-              (id, internal_reference, campaign_id, donor_name, donor_email, amount_sen, currency, attribution_preference, message, billplz_bill_id, billplz_url, payment_status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              (id, internal_reference, verification_token, campaign_id, donor_name, donor_email, amount_sen, currency, attribution_preference, message, referral, coral_name, is_gift, recipient_name, recipient_email, billplz_bill_id, billplz_url, payment_status, receipt_count, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           )
           .bind(
             id,
             internalReference,
+            verificationToken,
             'solaris-reef-2026',
             newDonation.donorName,
             newDonation.donorEmail,
@@ -528,15 +564,22 @@ export class Database {
             newDonation.currency,
             newDonation.attributionPreference,
             newDonation.message || null,
+            newDonation.referral || null,
+            newDonation.coralName || null,
+            newDonation.isGift ? 1 : 0,
+            newDonation.recipientName || null,
+            newDonation.recipientEmail || null,
             newDonation.billplzBillId,
             newDonation.billplzUrl || null,
             'pending',
+            0,
             now,
             now
           )
           .run();
       } catch (err) {
-        console.warn('D1 createDonation error, saving in memory:', err);
+        console.error('[DB] D1 createDonation error. Failing securely (no silent memory fallback):', err);
+        throw new DatabaseError('Failed to durably create donation record in database', err);
       }
     }
 
@@ -544,95 +587,109 @@ export class Database {
     return newDonation;
   }
 
+  public async getDonationByToken(token: string, d1?: D1DatabaseBinding): Promise<Donation | null> {
+    if (!token) return null;
+
+    if (d1) {
+      try {
+        const row = await d1
+          .prepare('SELECT * FROM donations WHERE verification_token = ? LIMIT 1')
+          .bind(token.trim())
+          .first<any>();
+
+        if (row) {
+          return this.mapDonationRow(row);
+        }
+        return null;
+      } catch (err) {
+        console.error('[DB] D1 getDonationByToken error:', err);
+        throw new DatabaseError('Failed to lookup donation by verification token', err);
+      }
+    }
+
+    return this.memData.donations.find((d) => d.verificationToken === token) || null;
+  }
+
   public async getDonationByReference(reference: string, d1?: D1DatabaseBinding): Promise<Donation | null> {
+    if (!reference) return null;
+
     if (d1) {
       try {
         const row = await d1
           .prepare('SELECT * FROM donations WHERE internal_reference = ? LIMIT 1')
-          .bind(reference)
+          .bind(reference.trim().toUpperCase())
           .first<any>();
 
         if (row) {
-          return {
-            id: row.id,
-            internalReference: row.internal_reference,
-            campaignId: row.campaign_id,
-            donorName: row.donor_name,
-            donorEmail: row.donor_email,
-            amountSen: Number(row.amount_sen),
-            currency: row.currency,
-            attributionPreference: row.attribution_preference,
-            message: row.message || '',
-            billplzBillId: row.billplz_bill_id,
-            billplzUrl: row.billplz_url,
-            paymentStatus: row.payment_status,
-            paidAt: row.paid_at,
-            callbackReceivedAt: row.callback_received_at,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          };
+          return this.mapDonationRow(row);
         }
+        return null;
       } catch (err) {
-        console.warn('D1 getDonationByReference error:', err);
+        console.error('[DB] D1 getDonationByReference error:', err);
+        throw new DatabaseError('Failed to lookup donation by reference', err);
       }
     }
 
-    return this.memData.donations.find((d) => d.internalReference === reference) || null;
+    return this.memData.donations.find(
+      (d) => d.internalReference.toUpperCase() === reference.trim().toUpperCase()
+    ) || null;
   }
 
   public async getDonationByBillId(billId: string, d1?: D1DatabaseBinding): Promise<Donation | null> {
+    if (!billId) return null;
+
     if (d1) {
       try {
         const row = await d1
           .prepare('SELECT * FROM donations WHERE billplz_bill_id = ? LIMIT 1')
-          .bind(billId)
+          .bind(billId.trim())
           .first<any>();
 
         if (row) {
-          return {
-            id: row.id,
-            internalReference: row.internal_reference,
-            campaignId: row.campaign_id,
-            donorName: row.donor_name,
-            donorEmail: row.donor_email,
-            amountSen: Number(row.amount_sen),
-            currency: row.currency,
-            attributionPreference: row.attribution_preference,
-            message: row.message || '',
-            billplzBillId: row.billplz_bill_id,
-            billplzUrl: row.billplz_url,
-            paymentStatus: row.payment_status,
-            paidAt: row.paid_at,
-            callbackReceivedAt: row.callback_received_at,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          };
+          return this.mapDonationRow(row);
         }
+        return null;
       } catch (err) {
-        console.warn('D1 getDonationByBillId error:', err);
+        console.error('[DB] D1 getDonationByBillId error:', err);
+        throw new DatabaseError('Failed to lookup donation by Billplz bill ID', err);
       }
     }
 
-    return this.memData.donations.find((d) => d.billplzBillId === billId) || null;
+    return this.memData.donations.find((d) => d.billplzBillId === billId.trim()) || null;
   }
 
+  /**
+   * Enforces the authoritative payment state machine:
+   * - Allowed transitions: pending -> paid, pending -> failed, pending -> cancelled
+   * - Idempotent: paid -> paid, failed -> failed
+   * - Prohibited: paid -> failed, paid -> cancelled (late callbacks cannot revert paid state)
+   */
   public async updateDonationPaymentStatus(
     referenceOrBillId: string,
     status: PaymentStatus,
     paidAt?: string,
     d1?: D1DatabaseBinding
-  ): Promise<{ donation: Donation | null; isStateChanged: boolean }> {
+  ): Promise<{ donation: Donation | null; isStateChanged: boolean; rejectedReversion?: boolean }> {
     const donation =
       (await this.getDonationByReference(referenceOrBillId, d1)) ||
-      (await this.getDonationByBillId(referenceOrBillId, d1));
+      (await this.getDonationByBillId(referenceOrBillId, d1)) ||
+      (await this.getDonationByToken(referenceOrBillId, d1));
 
     if (!donation) {
       return { donation: null, isStateChanged: false };
     }
 
-    // Idempotent check
+    // Idempotent duplicate check
     if (donation.paymentStatus === status) {
       return { donation, isStateChanged: false };
+    }
+
+    // Reversion Protection: A paid donation MUST NOT be reverted by late failure or cancellation
+    if (donation.paymentStatus === 'paid' && (status === 'failed' || status === 'cancelled')) {
+      console.warn(
+        `[PAYMENT STATE MACHINE] Rejected illegal state transition from 'paid' to '${status}' for donation ${donation.internalReference}`
+      );
+      return { donation, isStateChanged: false, rejectedReversion: true };
     }
 
     const now = new Date().toISOString();
@@ -640,6 +697,7 @@ export class Database {
 
     if (d1) {
       try {
+        // Atomic conditional update ensuring concurrency safety
         await d1
           .prepare(
             `UPDATE donations SET 
@@ -647,16 +705,17 @@ export class Database {
               paid_at = COALESCE(?, paid_at), 
               callback_received_at = ?, 
               updated_at = ? 
-             WHERE internal_reference = ?`
+             WHERE internal_reference = ? AND (payment_status != 'paid' OR ? = 'paid')`
           )
-          .bind(status, finalPaidAt || null, now, now, donation.internalReference)
+          .bind(status, finalPaidAt || null, now, now, donation.internalReference, status)
           .run();
       } catch (err) {
-        console.warn('D1 updateDonationPaymentStatus error:', err);
+        console.error('[DB] D1 updateDonationPaymentStatus error:', err);
+        throw new DatabaseError('Failed to durably update donation payment status', err);
       }
     }
 
-    // Also update in-memory record
+    // Update in-memory record
     const memDonation = this.memData.donations.find(
       (d) => d.internalReference === donation.internalReference
     );
@@ -675,6 +734,40 @@ export class Database {
     return { donation, isStateChanged: true };
   }
 
+  public async markReceiptSent(
+    internalReference: string,
+    d1?: D1DatabaseBinding
+  ): Promise<boolean> {
+    const now = new Date().toISOString();
+
+    if (d1) {
+      try {
+        await d1
+          .prepare(
+            `UPDATE donations SET 
+              receipt_sent_at = ?, 
+              receipt_count = receipt_count + 1, 
+              updated_at = ? 
+             WHERE internal_reference = ?`
+          )
+          .bind(now, now, internalReference)
+          .run();
+      } catch (err) {
+        console.error('[DB] D1 markReceiptSent error:', err);
+        throw new DatabaseError('Failed to record receipt dispatch in database', err);
+      }
+    }
+
+    const memDonation = this.memData.donations.find((d) => d.internalReference === internalReference);
+    if (memDonation) {
+      memDonation.receiptSentAt = now;
+      memDonation.receiptCount = (memDonation.receiptCount || 0) + 1;
+      memDonation.updatedAt = now;
+    }
+
+    return true;
+  }
+
   public async getDonations(
     filters?: {
       status?: string;
@@ -689,8 +782,8 @@ export class Database {
 
     if (d1) {
       try {
-        let whereClauses: string[] = [];
-        let params: any[] = [];
+        const whereClauses: string[] = [];
+        const params: any[] = [];
 
         if (filters?.status && filters.status !== 'all') {
           whereClauses.push('payment_status = ?');
@@ -700,9 +793,9 @@ export class Database {
         if (filters?.search) {
           const q = `%${filters.search.toLowerCase()}%`;
           whereClauses.push(
-            '(LOWER(internal_reference) LIKE ? OR LOWER(donor_name) LIKE ? OR LOWER(donor_email) LIKE ? OR LOWER(billplz_bill_id) LIKE ?)'
+            '(LOWER(internal_reference) LIKE ? OR LOWER(donor_name) LIKE ? OR LOWER(donor_email) LIKE ? OR LOWER(billplz_bill_id) LIKE ? OR LOWER(COALESCE(referral, \'\')) LIKE ? OR LOWER(COALESCE(coral_name, \'\')) LIKE ?)'
           );
-          params.push(q, q, q, q);
+          params.push(q, q, q, q, q, q);
         }
 
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -714,24 +807,7 @@ export class Database {
         const listQuery = `SELECT * FROM donations ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
         const listRes = await d1.prepare(listQuery).bind(...params, limit, offset).all<any>();
 
-        const items: Donation[] = (listRes?.results || []).map((row) => ({
-          id: row.id,
-          internalReference: row.internal_reference,
-          campaignId: row.campaign_id,
-          donorName: row.donor_name,
-          donorEmail: row.donor_email,
-          amountSen: Number(row.amount_sen),
-          currency: row.currency,
-          attributionPreference: row.attribution_preference,
-          message: row.message || '',
-          billplzBillId: row.billplz_bill_id,
-          billplzUrl: row.billplz_url,
-          paymentStatus: row.payment_status,
-          paidAt: row.paid_at,
-          callbackReceivedAt: row.callback_received_at,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        }));
+        const items: Donation[] = (listRes?.results || []).map((row) => this.mapDonationRow(row));
 
         return {
           items,
@@ -739,7 +815,8 @@ export class Database {
           hasMore: offset + limit < totalCount,
         };
       } catch (err) {
-        console.warn('D1 getDonations error, falling back to memory:', err);
+        console.error('[DB] D1 getDonations error:', err);
+        throw new DatabaseError('Failed to fetch donations from database', err);
       }
     }
 
@@ -756,7 +833,9 @@ export class Database {
           d.internalReference.toLowerCase().includes(q) ||
           d.donorName.toLowerCase().includes(q) ||
           d.donorEmail.toLowerCase().includes(q) ||
-          d.billplzBillId.toLowerCase().includes(q)
+          d.billplzBillId.toLowerCase().includes(q) ||
+          (d.referral && d.referral.toLowerCase().includes(q)) ||
+          (d.coralName && d.coralName.toLowerCase().includes(q))
       );
     }
 
@@ -777,7 +856,7 @@ export class Database {
       try {
         const res = await d1
           .prepare(
-            `SELECT id, donor_name, attribution_preference, amount_sen, message, paid_at, created_at 
+            `SELECT id, donor_name, attribution_preference, amount_sen, message, coral_name, paid_at, created_at 
              FROM donations 
              WHERE payment_status = 'paid' 
              ORDER BY COALESCE(paid_at, created_at) DESC 
@@ -793,11 +872,13 @@ export class Database {
             amountSen: Number(d.amount_sen),
             amountRm: Number(d.amount_sen) / 100,
             message: d.message || '',
+            coralName: d.coral_name || undefined,
             paidAt: d.paid_at || d.created_at,
           }));
         }
       } catch (err) {
-        console.warn('D1 getPublicRecentDonations error:', err);
+        console.error('[DB] D1 getPublicRecentDonations error:', err);
+        throw new DatabaseError('Failed to fetch recent public donations', err);
       }
     }
 
@@ -811,12 +892,13 @@ export class Database {
         amountSen: d.amountSen,
         amountRm: d.amountSen / 100,
         message: d.message,
+        coralName: d.coralName,
         paidAt: d.paidAt || d.createdAt,
       }));
   }
 
   // ---------------------------------------------------------------------------
-  // ADMIN USERS (D1 / In-Memory / Environment Secrets)
+  // ADMIN USERS
   // ---------------------------------------------------------------------------
 
   public async getAdminByEmail(email: string, d1?: D1DatabaseBinding): Promise<AdminUser | null> {
@@ -841,8 +923,10 @@ export class Database {
             updatedAt: row.updated_at,
           };
         }
+        return null;
       } catch (err) {
-        console.warn('D1 getAdminByEmail error:', err);
+        console.error('[DB] D1 getAdminByEmail error:', err);
+        throw new DatabaseError('Failed to query admin user by email', err);
       }
     }
 
@@ -871,8 +955,10 @@ export class Database {
             updatedAt: row.updated_at,
           };
         }
+        return null;
       } catch (err) {
-        console.warn('D1 getAdminById error:', err);
+        console.error('[DB] D1 getAdminById error:', err);
+        throw new DatabaseError('Failed to query admin user by ID', err);
       }
     }
 
@@ -906,7 +992,8 @@ export class Database {
           )
           .run();
       } catch (err) {
-        console.warn('D1 upsertAdminUser error:', err);
+        console.error('[DB] D1 upsertAdminUser error:', err);
+        throw new DatabaseError('Failed to upsert admin user in database', err);
       }
     }
 
@@ -920,7 +1007,7 @@ export class Database {
   }
 
   // ---------------------------------------------------------------------------
-  // AUDIT ACTIVITY & WEBHOOK LOGS (D1 / In-Memory)
+  // AUDIT ACTIVITY & WEBHOOK LOGS
   // ---------------------------------------------------------------------------
 
   public async logActivity(
@@ -954,7 +1041,7 @@ export class Database {
           )
           .run();
       } catch (err) {
-        console.warn('D1 logActivity error:', err);
+        console.error('[DB] D1 logActivity error:', err);
       }
     }
 
@@ -985,7 +1072,8 @@ export class Database {
           }));
         }
       } catch (err) {
-        console.warn('D1 getActivities error:', err);
+        console.error('[DB] D1 getActivities error:', err);
+        throw new DatabaseError('Failed to fetch admin activities', err);
       }
     }
 
@@ -1022,7 +1110,7 @@ export class Database {
           )
           .run();
       } catch (err) {
-        console.warn('D1 logWebhook error:', err);
+        console.error('[DB] D1 logWebhook error:', err);
       }
     }
 
@@ -1052,11 +1140,41 @@ export class Database {
           }));
         }
       } catch (err) {
-        console.warn('D1 getWebhookLogs error:', err);
+        console.error('[DB] D1 getWebhookLogs error:', err);
+        throw new DatabaseError('Failed to fetch webhook logs', err);
       }
     }
 
     return this.memData.webhookLogs.slice(0, limit);
+  }
+
+  private mapDonationRow(row: any): Donation {
+    return {
+      id: row.id,
+      internalReference: row.internal_reference,
+      verificationToken: row.verification_token || '',
+      campaignId: row.campaign_id,
+      donorName: row.donor_name,
+      donorEmail: row.donor_email,
+      amountSen: Number(row.amount_sen),
+      currency: row.currency,
+      attributionPreference: row.attribution_preference,
+      message: row.message || '',
+      referral: row.referral || '',
+      coralName: row.coral_name || undefined,
+      isGift: Boolean(row.is_gift),
+      recipientName: row.recipient_name || undefined,
+      recipientEmail: row.recipient_email || undefined,
+      billplzBillId: row.billplz_bill_id,
+      billplzUrl: row.billplz_url,
+      paymentStatus: row.payment_status,
+      paidAt: row.paid_at,
+      callbackReceivedAt: row.callback_received_at,
+      receiptSentAt: row.receipt_sent_at,
+      receiptCount: Number(row.receipt_count || 0),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
   }
 }
 
