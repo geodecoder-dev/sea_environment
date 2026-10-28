@@ -17,6 +17,7 @@ import {
   recordFailedLogin,
   resetLoginAttempts,
   AuthenticationConfigError,
+  generateSecureToken,
 } from './auth.js';
 import { calculateEntitlementsFromSen, MIN_DONATION_SEN, MAX_DONATION_SEN } from './services/pricing.js';
 import { buildReceiptPayload } from './services/receipts.js';
@@ -62,6 +63,42 @@ function jsonResponse(data: any, status = 200, headers: Record<string, string> =
       ...headers,
     },
   });
+}
+
+/**
+ * Idempotently sends the automated donation receipt email.
+ * Guarantees that callbacks and redirects arriving in any order or concurrently
+ * cannot dispatch duplicate receipts.
+ */
+async function dispatchReceiptIdempotently(
+  donation: any,
+  env?: Record<string, any>,
+  d1?: D1DatabaseBinding
+): Promise<boolean> {
+  // Re-fetch latest authoritative state to avoid race conditions
+  const latest = (await db.getDonationByReference(donation.internalReference, d1)) || donation;
+  if (latest.paymentStatus !== 'paid') {
+    return false;
+  }
+  // Idempotency check: receipt has already been sent
+  if ((latest.receiptCount ?? 0) > 0 || latest.receiptSentAt) {
+    return false;
+  }
+
+  try {
+    const receiptPayload = buildReceiptPayload({
+      ...latest,
+      paymentStatus: 'paid',
+      paidAt: latest.paidAt || new Date().toISOString(),
+    });
+    // Record receipt dispatched in DB
+    await db.markReceiptSent(latest.internalReference, d1);
+    await emailService.sendDonationReceipt(receiptPayload, env);
+    return true;
+  } catch (emailErr) {
+    console.warn('[RECEIPT DISPATCH] Non-blocking receipt dispatch warning:', emailErr);
+    return false;
+  }
 }
 
 /**
@@ -231,7 +268,12 @@ export async function handleUniversalApiRequest(
       const cleanCoralName = coralName ? String(coralName).trim().slice(0, 80) : undefined;
       const cleanRecipientName = recipientName ? String(recipientName).trim().slice(0, 120) : undefined;
       const cleanRecipientEmail = recipientEmail ? String(recipientEmail).trim().slice(0, 120) : undefined;
-      const tempRef = `SOL-${Date.now().toString(36).toUpperCase()}`;
+      const randomHex = Array.from(crypto.getRandomValues(new Uint8Array(2)))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+        .toUpperCase();
+      const internalReference = `SOL-${new Date().toISOString().slice(0, 7).replace('-', '')}-${randomHex}`;
+      const verificationToken = generateSecureToken(16);
 
       const collectionId = config.billplz.collectionId || '';
 
@@ -244,10 +286,10 @@ export async function handleUniversalApiRequest(
             name: donorCleanName,
             amountSen: parsedAmount,
             callbackUrl: `${appOrigin}/api/webhooks/billplz`,
-            redirectUrl: `${appOrigin}/donation/result`,
-            description: `Solaris Reef Coral Restoration — ${tempRef}`,
-            reference1Label: 'Campaign',
-            reference1: 'Solaris Reef',
+            redirectUrl: `${appOrigin}/donation/result?ref=${encodeURIComponent(internalReference)}&token=${encodeURIComponent(verificationToken)}`,
+            description: `Solaris Reef Coral Restoration — ${internalReference}`,
+            reference1Label: 'Reference',
+            reference1: internalReference,
             reference2Label: cleanReferral ? 'Referral' : undefined,
             reference2: cleanReferral,
           },
@@ -259,9 +301,11 @@ export async function handleUniversalApiRequest(
       }
 
       // Durably create donation record in D1 (or memory store in test mode).
-      // If D1 fails, DatabaseError is thrown and caught below (NO silent ephemeral fallback).
+      // Explicitly matches the returned Billplz Bill ID to the internal donation reference.
       const donation = await db.createDonation(
         {
+          internalReference,
+          verificationToken,
           donorName: donorCleanName,
           donorEmail: String(donorEmail).trim(),
           amountSen: parsedAmount,
@@ -303,6 +347,7 @@ export async function handleUniversalApiRequest(
 
     // -------------------------------------------------------------------------
     // 4. Secure Transaction Lookup & Public Verification
+    // Supports verified Billplz redirect payload updates idempotently
     // -------------------------------------------------------------------------
     if (path.startsWith('/api/donations/lookup') || path.startsWith('/api/donations/verify/')) {
       // Rate-limit lookups to prevent brute-force enumeration: 60/min
@@ -313,7 +358,12 @@ export async function handleUniversalApiRequest(
 
       let token = url.searchParams.get('token') || '';
       let ref = url.searchParams.get('ref') || '';
-      let billId = url.searchParams.get('bill_id') || url.searchParams.get('billId') || '';
+      let billId =
+        url.searchParams.get('billplz[id]') ||
+        url.searchParams.get('bill_id') ||
+        url.searchParams.get('billId') ||
+        url.searchParams.get('id') ||
+        '';
 
       if (path.startsWith('/api/donations/verify/')) {
         const pathParam = decodeURIComponent(path.replace('/api/donations/verify/', '')).trim();
@@ -323,6 +373,57 @@ export async function handleUniversalApiRequest(
           token = pathParam;
         } else {
           billId = pathParam;
+        }
+      }
+
+      // Check if this request carries Billplz redirect verification parameters
+      const redirectSig =
+        url.searchParams.get('billplz[x_signature]') ||
+        url.searchParams.get('x_signature') ||
+        '';
+
+      if (redirectSig) {
+        const queryParams: Record<string, any> = {};
+        url.searchParams.forEach((val, key) => {
+          queryParams[key] = val;
+        });
+
+        const redirectResult = await billplz.verifyRedirect(queryParams, redirectSig, context.env);
+        if (redirectResult.isValid && redirectResult.billId) {
+          billId = redirectResult.billId;
+          const targetDonation =
+            (await db.getDonationByBillId(billId, d1)) ||
+            (ref ? await db.getDonationByReference(ref, d1) : null) ||
+            (token ? await db.getDonationByToken(token, d1) : null);
+
+          if (targetDonation) {
+            const nextStatus = redirectResult.isPaid ? 'paid' : 'failed';
+            const paidAt = redirectResult.paidAt || (nextStatus === 'paid' ? new Date().toISOString() : undefined);
+
+            const updateResult = await db.updateDonationPaymentStatus(
+              targetDonation.internalReference,
+              nextStatus,
+              paidAt,
+              d1
+            );
+
+            await db.logWebhook(
+              {
+                billId,
+                internalRef: targetDonation.internalReference,
+                status: updateResult.isStateChanged ? 'valid' : 'duplicate_ignored',
+                signatureVerified: true,
+                payloadSummary: `Redirect verified: isPaid=${redirectResult.isPaid}, nextStatus=${nextStatus}, stateChanged=${updateResult.isStateChanged}, rejectedReversion=${Boolean(updateResult.rejectedReversion)}`,
+              },
+              d1
+            );
+
+            if (nextStatus === 'paid' && updateResult.isStateChanged) {
+              await dispatchReceiptIdempotently(targetDonation, context.env, d1);
+            }
+          }
+        } else {
+          console.warn('[REDIRECT LOOKUP] Rejected invalid redirect X-Signature attempt:', redirectResult.reason);
         }
       }
 
@@ -368,6 +469,51 @@ export async function handleUniversalApiRequest(
     }
 
     // -------------------------------------------------------------------------
+    // 4b. Dedicated Billplz Redirect Handler (Browser Return Destination)
+    // -------------------------------------------------------------------------
+    if ((path === '/api/donations/billplz-redirect' || path === '/api/donations/redirect') && method === 'GET') {
+      const queryParams: Record<string, any> = {};
+      url.searchParams.forEach((val, key) => {
+        queryParams[key] = val;
+      });
+
+      const redirectSig = url.searchParams.get('billplz[x_signature]') || url.searchParams.get('x_signature') || '';
+      const redirectResult = await billplz.verifyRedirect(queryParams, redirectSig, context.env);
+
+      let billId = redirectResult.billId || url.searchParams.get('billplz[id]') || url.searchParams.get('bill_id') || '';
+      let ref = url.searchParams.get('ref') || '';
+      let token = url.searchParams.get('token') || '';
+
+      let donation = billId ? await db.getDonationByBillId(billId, d1) : null;
+      if (!donation && ref) donation = await db.getDonationByReference(ref, d1);
+      if (!donation && token) donation = await db.getDonationByToken(token, d1);
+
+      if (donation && redirectResult.isValid) {
+        const nextStatus = redirectResult.isPaid ? 'paid' : 'failed';
+        const paidAt = redirectResult.paidAt || (nextStatus === 'paid' ? new Date().toISOString() : undefined);
+        const updateResult = await db.updateDonationPaymentStatus(donation.internalReference, nextStatus, paidAt, d1);
+
+        if (nextStatus === 'paid' && updateResult.isStateChanged) {
+          await dispatchReceiptIdempotently(donation, context.env, d1);
+        }
+
+        ref = donation.internalReference;
+        token = donation.verificationToken;
+      }
+
+      const appOrigin = config.canonicalAppUrl || url.origin;
+      const targetUrl = new URL(`${appOrigin}/donation/result`);
+      if (ref) targetUrl.searchParams.set('ref', ref);
+      if (token) targetUrl.searchParams.set('token', token);
+      if (billId) targetUrl.searchParams.set('billplz[id]', billId);
+      if (redirectResult.isValid) {
+        targetUrl.searchParams.set('billplz[paid]', String(redirectResult.isPaid));
+      }
+
+      return Response.redirect(targetUrl.toString(), 302);
+    }
+
+    // -------------------------------------------------------------------------
     // 5. Official Billplz Webhook Callback
     // -------------------------------------------------------------------------
     if (path === '/api/webhooks/billplz' && method === 'POST') {
@@ -395,7 +541,12 @@ export async function handleUniversalApiRequest(
       const webhookResult = await billplz.verifyWebhook(payload, signature, context.env);
       const billId = webhookResult.billId;
 
-      const donation = await db.getDonationByBillId(billId, d1);
+      // Match returned Billplz Bill ID to correct internal donation reference
+      let donation = await db.getDonationByBillId(billId, d1);
+      if (!donation && webhookResult.internalRef) {
+        donation = await db.getDonationByReference(webhookResult.internalRef, d1);
+      }
+
       if (!donation) {
         await db.logWebhook(
           {
@@ -445,19 +596,9 @@ export async function handleUniversalApiRequest(
         d1
       );
 
-      // Dispatch automated receipt on verified payment (isolated failure handling)
-      if (nextStatus === 'paid' && updateResult.isStateChanged && donation.paymentStatus !== 'paid') {
-        try {
-          const receiptPayload = buildReceiptPayload({
-            ...donation,
-            paymentStatus: 'paid',
-            paidAt,
-          });
-          await emailService.sendDonationReceipt(receiptPayload, context.env);
-          await db.markReceiptSent(donation.internalReference, d1);
-        } catch (emailErr) {
-          console.warn('[WEBHOOK] Non-blocking receipt dispatch error:', emailErr);
-        }
+      // Idempotent receipt dispatch: callbacks and redirects in either order cannot duplicate receipts
+      if (nextStatus === 'paid' && updateResult.isStateChanged) {
+        await dispatchReceiptIdempotently(donation, context.env, d1);
       }
 
       return new Response('OK', { status: 200 });

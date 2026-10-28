@@ -30,6 +30,8 @@ export interface BillResult {
   url: string;
   reference1?: string;
   reference2?: string;
+  callbackUrl?: string;
+  redirectUrl?: string;
   isSimulated?: boolean;
 }
 
@@ -45,7 +47,19 @@ export interface WebhookVerificationResult {
   reason?: string;
 }
 
+export interface RedirectVerificationResult {
+  isValid: boolean;
+  billId: string;
+  isPaid: boolean;
+  paidAt?: string;
+  internalRef?: string;
+  rawPayload: Record<string, any>;
+  reason?: string;
+}
+
 export interface PaymentProvider {
   createBill(options: CreateBillOptions, env?: Record<string, any>): Promise<BillResult>;
   verifyWebhook(params: Record<string, any>, signature: string, env?: Record<string, any>): Promise<WebhookVerificationResult>;
+  verifyRedirect?(params: Record<string, any>, signature?: string, env?: Record<string, any>): Promise<RedirectVerificationResult>;
 }
+

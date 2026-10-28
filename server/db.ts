@@ -511,13 +511,17 @@ export class Database {
       recipientEmail?: string;
       billplzBillId: string;
       billplzUrl?: string;
+      internalReference?: string;
+      verificationToken?: string;
     },
     d1?: D1DatabaseBinding
   ): Promise<Donation> {
     // Reference: human-readable receipt number
-    const internalReference = `SOL-${new Date().toISOString().slice(0, 7).replace('-', '')}-${generateRandomHex(2).toUpperCase()}`;
+    const internalReference =
+      data.internalReference ||
+      `SOL-${new Date().toISOString().slice(0, 7).replace('-', '')}-${generateRandomHex(2).toUpperCase()}`;
     // 128-bit cryptographically secure opaque token for public lookup & verification
-    const verificationToken = generateSecureToken(16);
+    const verificationToken = data.verificationToken || generateSecureToken(16);
     const id = `don-${generateRandomHex(6)}`;
     const now = new Date().toISOString();
 

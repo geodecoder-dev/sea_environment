@@ -63,7 +63,9 @@ export const DonationResultPage: React.FC<DonationResultProps> = ({ onNavigate }
     }
 
     try {
-      const query = token ? `token=${encodeURIComponent(token)}` : `ref=${encodeURIComponent(ref!)}`;
+      const query = window.location.search && window.location.search.length > 1
+        ? window.location.search.slice(1)
+        : (token ? `token=${encodeURIComponent(token)}` : `ref=${encodeURIComponent(ref!)}`);
       const res = await fetch(`/api/donations/lookup?${query}`);
       if (!res.ok) {
         if (res.status === 404) {

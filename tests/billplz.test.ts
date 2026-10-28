@@ -89,4 +89,131 @@ describe('Billplz Payment Provider & X-Signature Verification', () => {
       )
     ).rejects.toThrow();
   });
+
+  it('strictly requires both callback_url and redirect_url in createBill', async () => {
+    const simEnv = {
+      ENABLE_PAYMENT_SIMULATION: 'true',
+    };
+
+    // Missing callbackUrl
+    await expect(
+      service.createBill(
+        {
+          email: 'test@example.com',
+          name: 'Test Donor',
+          amountSen: 5000,
+          callbackUrl: '',
+          redirectUrl: 'https://example.com/redirect',
+          description: 'Test Bill',
+        },
+        simEnv
+      )
+    ).rejects.toThrow(/callback_url is required/);
+
+    // Missing redirectUrl
+    await expect(
+      service.createBill(
+        {
+          email: 'test@example.com',
+          name: 'Test Donor',
+          amountSen: 5000,
+          callbackUrl: 'https://example.com/callback',
+          redirectUrl: '',
+          description: 'Test Bill',
+        },
+        simEnv
+      )
+    ).rejects.toThrow(/redirect_url is required/);
+
+    // Both provided -> succeeds and includes both in result
+    const result = await service.createBill(
+      {
+        email: 'test@example.com',
+        name: 'Test Donor',
+        amountSen: 5000,
+        callbackUrl: 'https://solarisreef.org/api/webhooks/billplz',
+        redirectUrl: 'https://solarisreef.org/donation/result?ref=SOL-202610-88A1',
+        description: 'Test Bill',
+        reference1: 'SOL-202610-88A1',
+      },
+      simEnv
+    );
+
+    expect(result.callbackUrl).toBe('https://solarisreef.org/api/webhooks/billplz');
+    expect(result.redirectUrl).toBe('https://solarisreef.org/donation/result?ref=SOL-202610-88A1');
+    expect(result.reference1).toBe('SOL-202610-88A1');
+  });
+
+  it('generates and verifies Billplz redirect X-Signature with billplz[...] bracketed query parameters', async () => {
+    const redirectParams = {
+      'billplz[id]': 'W_79pJDk',
+      'billplz[paid]': 'true',
+      'billplz[paid_at]': '2026-10-31 10:00:00 +0800',
+    };
+
+    // Calculate signature using official spec (key+value sorted alphabetically and pipe-joined)
+    const sig = await service.generateXSignature(redirectParams, mockEnv);
+    expect(sig).toBeTypeOf('string');
+    expect(sig.length).toBe(64);
+
+    // Verify redirect using flat query parameter object
+    const result = await service.verifyRedirect(
+      {
+        ...redirectParams,
+        'billplz[x_signature]': sig,
+      },
+      undefined,
+      mockEnv
+    );
+
+    expect(result.isValid).toBe(true);
+    expect(result.billId).toBe('W_79pJDk');
+    expect(result.isPaid).toBe(true);
+    expect(result.paidAt).toBe('2026-10-31 10:00:00 +0800');
+  });
+
+  it('verifies redirect X-Signature when query params are parsed into a nested billplz object', async () => {
+    const rawRedirectParams = {
+      'billplz[id]': 'W_88xLMo',
+      'billplz[paid]': 'true',
+      'billplz[paid_at]': '2026-10-31 12:00:00 +0800',
+    };
+    const sig = await service.generateXSignature(rawRedirectParams, mockEnv);
+
+    // Some HTTP routers parse billplz[id] into { billplz: { id: '...' } }
+    const nestedParams = {
+      billplz: {
+        id: 'W_88xLMo',
+        paid: 'true',
+        paid_at: '2026-10-31 12:00:00 +0800',
+        x_signature: sig,
+      },
+    };
+
+    const result = await service.verifyRedirect(nestedParams, undefined, mockEnv);
+    expect(result.isValid).toBe(true);
+    expect(result.billId).toBe('W_88xLMo');
+    expect(result.isPaid).toBe(true);
+  });
+
+  it('rejects tampered redirect payload (e.g. attacker changing billplz[paid] from false to true)', async () => {
+    const legitimateParams = {
+      'billplz[id]': 'W_unpaid_123',
+      'billplz[paid]': 'false',
+      'billplz[paid_at]': '',
+    };
+    const legitimateSig = await service.generateXSignature(legitimateParams, mockEnv);
+
+    // Attacker modifies billplz[paid] to 'true' in URL query string
+    const tamperedQuery = {
+      'billplz[id]': 'W_unpaid_123',
+      'billplz[paid]': 'true',
+      'billplz[paid_at]': '',
+      'billplz[x_signature]': legitimateSig,
+    };
+
+    const result = await service.verifyRedirect(tamperedQuery, undefined, mockEnv);
+    expect(result.isValid).toBe(false);
+    expect(result.reason).toBe('Invalid redirect X-Signature');
+  });
 });

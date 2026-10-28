@@ -3,7 +3,13 @@
  * Standard Web Fetch and Web Crypto APIs (compatible with Cloudflare Workers & Node.js 18+)
  */
 
-import { CreateBillOptions, BillResult, PaymentProvider, WebhookVerificationResult } from './provider.js';
+import {
+  CreateBillOptions,
+  BillResult,
+  PaymentProvider,
+  WebhookVerificationResult,
+  RedirectVerificationResult,
+} from './provider.js';
 
 export interface BillplzConfig {
   apiKey?: string;
@@ -22,6 +28,16 @@ function generateRandomHex(byteCount = 6): string {
   const bytes = new Uint8Array(byteCount);
   crypto.getRandomValues(bytes);
   return bytesToHex(bytes);
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
 }
 
 export class BillplzService implements PaymentProvider {
@@ -99,6 +115,14 @@ export class BillplzService implements PaymentProvider {
       ? 'https://www.billplz-sandbox.com/api/v3'
       : 'https://www.billplz.com/api/v3';
 
+    // Strict validation: Both callback_url and redirect_url must be provided
+    if (!options.callbackUrl || !String(options.callbackUrl).trim()) {
+      throw new Error('BILLPLZ_MISSING_CALLBACK_URL: callback_url is required for Billplz bill creation.');
+    }
+    if (!options.redirectUrl || !String(options.redirectUrl).trim()) {
+      throw new Error('BILLPLZ_MISSING_REDIRECT_URL: redirect_url is required for Billplz bill creation.');
+    }
+
     if (isReal) {
       try {
         const auth = btoa(`${config.apiKey}:`);
@@ -110,8 +134,8 @@ export class BillplzService implements PaymentProvider {
           callback_url: options.callbackUrl,
           redirect_url: options.redirectUrl,
           description: options.description,
-          reference_1_label: options.reference1Label || 'Campaign',
-          reference_1: options.reference1 || 'Solaris Reef',
+          reference_1_label: options.reference1Label || 'Reference',
+          reference_1: options.reference1 || '',
           ...(options.reference2 ? {
             reference_2_label: options.reference2Label || 'Referral',
             reference_2: options.reference2,
@@ -146,6 +170,8 @@ export class BillplzService implements PaymentProvider {
           url: data.url,
           reference1: data.reference_1,
           reference2: data.reference_2,
+          callbackUrl: options.callbackUrl,
+          redirectUrl: options.redirectUrl,
           isSimulated: false,
         };
       } catch (err: any) {
@@ -177,15 +203,19 @@ export class BillplzService implements PaymentProvider {
       url: simulatedUrl,
       reference1: options.reference1 || 'Solaris Reef',
       reference2: options.reference2,
+      callbackUrl: options.callbackUrl,
+      redirectUrl: options.redirectUrl,
       isSimulated: true,
     };
   }
 
   /**
-   * Generates a Billplz X-Signature using Web Crypto HMAC-SHA256 according to Billplz specs:
-   * 1. Sort all payload parameters alphabetically (excluding x_signature)
-   * 2. Join values using the pipe '|' character
-   * 3. Compute HMAC-SHA256 hash using the X-Signature key
+   * Generates a Billplz X-Signature using Web Crypto HMAC-SHA256 according to official Billplz specs:
+   * 1. Exclude the signature key (x_signature or billplz[x_signature])
+   * 2. Sort all parameter keys in ascending alphabetical order (case-insensitive)
+   * 3. Concatenate each key directly to its value without delimiter: key + value
+   * 4. Join all key+value pairs using the pipe '|' character
+   * 5. Compute HMAC-SHA256 hash using the X-Signature key
    */
   public async generateXSignature(
     params: Record<string, any>,
@@ -198,10 +228,13 @@ export class BillplzService implements PaymentProvider {
     }
 
     const keys = Object.keys(params)
-      .filter((k) => k !== 'x_signature')
-      .sort();
+      .filter((k) => {
+        const lower = k.toLowerCase();
+        return lower !== 'x_signature' && lower !== 'billplz[x_signature]' && lower !== 'billplz[xsignature]';
+      })
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
-    const dataString = keys.map((k) => String(params[k] ?? '')).join('|');
+    const dataString = keys.map((k) => `${k}${params[k] ?? ''}`).join('|');
     const enc = new TextEncoder();
 
     const key = await crypto.subtle.importKey(
@@ -218,6 +251,8 @@ export class BillplzService implements PaymentProvider {
 
   /**
    * Verifies the Billplz X-Signature using Web Crypto with timing-safe comparison.
+   * Handles canonical Billplz specification (key+value joined with pipe) and
+   * maintains backward compatibility for legacy value-only payloads.
    */
   public async verifyXSignature(
     params: Record<string, any>,
@@ -226,17 +261,156 @@ export class BillplzService implements PaymentProvider {
   ): Promise<boolean> {
     if (!signature) return false;
     try {
-      const expected = await this.generateXSignature(params, env);
-      if (signature.length !== expected.length) return false;
+      const config = this.resolveConfig(env);
+      if (!config.xSignatureKey) return false;
 
-      let result = 0;
-      for (let i = 0; i < signature.length; i++) {
-        result |= signature.charCodeAt(i) ^ expected.charCodeAt(i);
+      // 1. Canonical Billplz v3 specification: key+value joined by pipe '|'
+      const expected = await this.generateXSignature(params, env);
+      if (timingSafeEqual(signature.toLowerCase(), expected.toLowerCase())) {
+        return true;
       }
-      return result === 0;
+
+      // 2. Fallback compatibility: value-only joined by pipe '|'
+      const keys = Object.keys(params)
+        .filter((k) => {
+          const lower = k.toLowerCase();
+          return lower !== 'x_signature' && lower !== 'billplz[x_signature]' && lower !== 'billplz[xsignature]';
+        })
+        .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+      const legacyDataString = keys.map((k) => String(params[k] ?? '')).join('|');
+
+      const enc = new TextEncoder();
+      const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        enc.encode(config.xSignatureKey),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+      );
+      const legacyBuf = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(legacyDataString));
+      const legacyExpected = bytesToHex(new Uint8Array(legacyBuf));
+
+      return timingSafeEqual(signature.toLowerCase(), legacyExpected.toLowerCase());
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Normalizes redirect query parameters from either flat keys or nested objects:
+   * e.g. { 'billplz[id]': '...', 'billplz[paid]': 'true', 'billplz[paid_at]': '...', 'billplz[x_signature]': '...' }
+   * or { billplz: { id: '...', paid: 'true', paid_at: '...', x_signature: '...' } }
+   * or flat { id: '...', paid: 'true', paid_at: '...', x_signature: '...' }
+   */
+  public normalizeRedirectParams(params: Record<string, any>): {
+    normalizedParams: Record<string, any>;
+    signature: string;
+    billId: string;
+    isPaid: boolean;
+    paidAt?: string;
+  } {
+    const normalized: Record<string, any> = {};
+    let signature = '';
+    let billId = '';
+    let isPaid = false;
+    let paidAt: string | undefined = undefined;
+
+    // 1. If parameters are nested under `billplz` object
+    if (params.billplz && typeof params.billplz === 'object') {
+      for (const [k, v] of Object.entries(params.billplz)) {
+        const lowerKey = k.toLowerCase();
+        if (lowerKey === 'x_signature' || lowerKey === 'signature') {
+          signature = String(v ?? '');
+        } else {
+          normalized[`billplz[${k}]`] = String(v ?? '');
+          if (lowerKey === 'id') billId = String(v ?? '');
+          if (lowerKey === 'paid') isPaid = String(v ?? '').toLowerCase() === 'true';
+          if (lowerKey === 'paid_at') paidAt = String(v ?? '');
+        }
+      }
+    }
+
+    // 2. Scan top-level keys
+    for (const [k, v] of Object.entries(params)) {
+      if (k === 'billplz' && typeof v === 'object') continue;
+      const lowerKey = k.toLowerCase();
+      if (lowerKey === 'billplz[x_signature]' || lowerKey === 'x_signature') {
+        if (!signature) signature = String(v ?? '');
+      } else if (lowerKey.startsWith('billplz[')) {
+        normalized[k] = String(v ?? '');
+        if (lowerKey === 'billplz[id]') billId = String(v ?? '');
+        if (lowerKey === 'billplz[paid]') isPaid = String(v ?? '').toLowerCase() === 'true';
+        if (lowerKey === 'billplz[paid_at]') paidAt = String(v ?? '');
+      }
+    }
+
+    // 3. Fallback: If no billplz[...] keys exist, check flat keys (id, paid, paid_at, x_signature)
+    if (Object.keys(normalized).length === 0) {
+      for (const [k, v] of Object.entries(params)) {
+        const lowerKey = k.toLowerCase();
+        if (lowerKey === 'x_signature') {
+          if (!signature) signature = String(v ?? '');
+        } else if (['id', 'paid', 'paid_at', 'amount', 'state'].includes(lowerKey)) {
+          normalized[k] = String(v ?? '');
+          if (lowerKey === 'id') billId = String(v ?? '');
+          if (lowerKey === 'paid') isPaid = String(v ?? '').toLowerCase() === 'true';
+          if (lowerKey === 'paid_at') paidAt = String(v ?? '');
+        }
+      }
+    }
+
+    return { normalizedParams: normalized, signature, billId, isPaid, paidAt };
+  }
+
+  /**
+   * Complete redirect verification combining signature validation & query parameter decoding
+   */
+  public async verifyRedirect(
+    params: Record<string, any>,
+    signature?: string,
+    env?: Record<string, any>
+  ): Promise<RedirectVerificationResult> {
+    const extracted = this.normalizeRedirectParams(params);
+    const targetSignature = signature || extracted.signature;
+
+    if (!extracted.billId) {
+      return {
+        isValid: false,
+        billId: '',
+        isPaid: false,
+        rawPayload: params,
+        reason: 'Missing Billplz Bill ID in redirect query parameters',
+      };
+    }
+
+    if (!targetSignature) {
+      return {
+        isValid: false,
+        billId: extracted.billId,
+        isPaid: extracted.isPaid,
+        rawPayload: params,
+        reason: 'Missing Billplz X-Signature in redirect query parameters',
+      };
+    }
+
+    const isValidSig = await this.verifyXSignature(extracted.normalizedParams, targetSignature, env);
+    if (!isValidSig) {
+      return {
+        isValid: false,
+        billId: extracted.billId,
+        isPaid: extracted.isPaid,
+        rawPayload: params,
+        reason: 'Invalid redirect X-Signature',
+      };
+    }
+
+    return {
+      isValid: true,
+      billId: extracted.billId,
+      isPaid: extracted.isPaid,
+      paidAt: extracted.paidAt || (extracted.isPaid ? new Date().toISOString() : undefined),
+      rawPayload: params,
+    };
   }
 
   /**
@@ -259,7 +433,19 @@ export class BillplzService implements PaymentProvider {
       };
     }
 
-    const isValidSig = await this.verifyXSignature(params, signature, env);
+    const targetSignature = signature || params.x_signature || '';
+    if (!targetSignature) {
+      return {
+        isValid: false,
+        billId,
+        isPaid: false,
+        state: 'due',
+        rawPayload: params,
+        reason: 'Missing Billplz X-Signature in payload',
+      };
+    }
+
+    const isValidSig = await this.verifyXSignature(params, targetSignature, env);
     if (!isValidSig) {
       return {
         isValid: false,
@@ -291,3 +477,4 @@ export class BillplzService implements PaymentProvider {
 }
 
 export const billplz = new BillplzService();
+
