@@ -1,4 +1,4 @@
-```yaml
+
 name: Solaris Reef CI
 
 on:
@@ -28,4 +28,3 @@ jobs:
 
       - name: Build Production Client
         run: npm run build
-```
