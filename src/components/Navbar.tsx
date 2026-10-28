@@ -39,9 +39,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
             onClick={(e) => handleNavClick('/', e)}
             className="flex items-center gap-2.5 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF7F6A] rounded-sm whitespace-nowrap shrink-0 group"
           >
-            <div className="w-9 h-9 rounded-full bg-[#123047] text-[#FFFDF7] flex items-center justify-center transition-transform group-hover:scale-105">
-              <Waves className="w-5 h-5 text-[#B8E0D2]" />
-            </div>
+            <img
+              src="/images/solaris_logo.png"
+              alt="Solaris logo"
+              className="w-15 h-15 object-contain"
+            />
             <div className="flex flex-col text-left">
               <span className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-[#123047] leading-none">
                 Reef

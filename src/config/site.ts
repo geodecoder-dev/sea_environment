@@ -75,7 +75,7 @@ export interface SiteConfig {
 export const siteConfig: SiteConfig = {
   organisationName: 'Leo-Lion Club of KL Solaris',
   leadCoordinator: 'Bernice Tang',
-  initiativeName: 'Citizen Restoration Programme (CRP)',
+  initiativeName: 'Adopt a coral',
   partnerName: 'Coralku',
   motto: 'coralku, coralmu jua',
   tagline: 'Science-Backed Coral Reef Conservation, Restoration & Research.',

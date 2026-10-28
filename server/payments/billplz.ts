@@ -227,14 +227,20 @@ export class BillplzService implements PaymentProvider {
       throw new Error('BILLPLZ_X_SIGNATURE_KEY_MISSING');
     }
 
-    const keys = Object.keys(params)
-      .filter((k) => {
-        const lower = k.toLowerCase();
-        return lower !== 'x_signature' && lower !== 'billplz[x_signature]' && lower !== 'billplz[xsignature]';
-      })
-      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-
-    const dataString = keys.map((k) => `${k}${params[k] ?? ''}`).join('|');
+    const dataString = Object.keys(params)
+  .filter((k) => {
+    const lower = k.toLowerCase();
+    return (
+      lower !== 'x_signature' &&
+      lower !== 'billplz[x_signature]' &&
+      lower !== 'billplz[xsignature]'
+    );
+  })
+  .map((k) => `${k}${params[k] ?? ''}`)
+  .sort((a, b) =>
+    a.toLowerCase().localeCompare(b.toLowerCase())
+  )
+  .join('|');
     const enc = new TextEncoder();
 
     const key = await crypto.subtle.importKey(

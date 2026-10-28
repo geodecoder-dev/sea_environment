@@ -582,11 +582,10 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
             </button>
 
             <h3 id="inquiry-title" className="font-serif text-2xl font-bold text-[#123047] pr-8">
-              Corporate and group restoration
+              Get In Touch!
             </h3>
             <p className="text-sm text-[#123047]/70 mt-2 mb-6">
-              Plan a hands-on planting session for up to 20 people at Pantai Pasir Besar, guided by Coralku
-              marine biologists.
+              Have a question in mind? Fill out the form below and our team will reply within 36 hours.
             </p>
 
             <form onSubmit={handleInquirySubmit} className="space-y-4">

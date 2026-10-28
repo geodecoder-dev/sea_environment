@@ -286,7 +286,7 @@ export async function handleUniversalApiRequest(
             name: donorCleanName,
             amountSen: parsedAmount,
             callbackUrl: `${appOrigin}/api/webhooks/billplz`,
-            redirectUrl: `${appOrigin}/donation/result?ref=${encodeURIComponent(internalReference)}&token=${encodeURIComponent(verificationToken)}`,
+            redirectUrl: `${appOrigin}/api/donations/billplz-redirect?ref=${encodeURIComponent(internalReference)}&token=${encodeURIComponent(verificationToken)}`,
             description: `Solaris Reef Coral Restoration — ${internalReference}`,
             reference1Label: 'Reference',
             reference1: internalReference,
