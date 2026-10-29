@@ -46,7 +46,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
             />
             <div className="flex flex-col text-left">
               <span className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-[#123047] leading-none">
-                Reef
+                Adopt a Coral
               </span>
               <span className="text-[10px] tracking-wider uppercase font-semibold text-[#247BA0] mt-0.5">
                 Leo-Lion KL Solaris
