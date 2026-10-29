@@ -585,7 +585,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
               Get In Touch!
             </h3>
             <p className="text-sm text-[#123047]/70 mt-2 mb-6">
-              Have a question in mind? Fill out the form below and our team will reply within 36 hours.
+              Interested in getting hands-on with us to plant coral? Fill in your details below, and we’ll contact you with more information.
             </p>
 
             <form onSubmit={handleInquirySubmit} className="space-y-4">
