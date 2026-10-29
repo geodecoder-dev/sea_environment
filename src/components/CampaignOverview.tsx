@@ -77,7 +77,7 @@ export const CampaignOverview: React.FC<CampaignOverviewProps> = ({
                 3. Citizen Diver Action
               </h3>
               <p className="text-sm text-[#123047]/80 leading-relaxed">
-                Leo-Lion Club of KL Solaris will work alongside Coralku marine scientists at Pulau Lang Tengah. Citizen divers learn non-invasive fragment collection, frame attachment, and photogrammetry monitoring that resulted in documented multi-species natural spawning.
+                Leo-Lions Club of KL Solaris will work alongside Coralku marine scientists at Pulau Lang Tengah. Citizen divers learn non-invasive fragment collection, frame attachment, and photogrammetry monitoring that resulted in documented multi-species natural spawning.
               </p>
             </div>
             <div className="mt-6 pt-4 border-t border-[#123047]/10 text-xs text-[#426B50] font-medium">
