@@ -59,12 +59,12 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             <ul className="space-y-2.5 text-sm text-[#FFFDF7]/75">
               <li>
                 <a href="#overview" className="hover:text-white transition-colors">
-                  Why Coral Reefs Matter
+                  Why Reefs Matter
                 </a>
               </li>
               <li>
                 <a href="#impact" className="hover:text-white transition-colors">
-                  Live Impact Metrics
+                  Impact
                 </a>
               </li>
               <li>
