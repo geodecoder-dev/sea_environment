@@ -49,7 +49,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
                 Adopt a Coral
               </span>
               <span className="text-[10px] tracking-wider uppercase font-semibold text-[#247BA0] mt-0.5">
-                Leo-Lion KL Solaris
+                Leo-Lions Club of KL Solaris
               </span>
             </div>
           </a>
@@ -141,7 +141,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
             onClick={(e) => handleNavClick('#about-club', e)}
             className="block text-base font-medium text-[#123047] py-2 hover:text-[#247BA0]"
           >
-            About Leo-Lion KL Solaris
+            About Leo-Lions Club of KL Solaris
           </a>
           <div className="pt-2 border-t border-[#123047]/10 flex items-center justify-between">
             <button
