@@ -55,7 +55,7 @@ export const HeroCollage: React.FC<HeroCollageProps> = ({
 
             <p className="mt-6 text-base sm:text-lg text-[#123047]/80 leading-relaxed max-w-xl font-normal">
               Rising sea temperatures and bleaching have severely impacted Malaysia’s tropical reefs. 
-              The <strong className="font-semibold text-[#123047]">Leo-Lion Club of KL Solaris</strong> partners with <strong className="font-semibold text-[#247BA0]">Coralku</strong> marine researchers to cultivate heat-resilient super-corals, deploy eco-friendly Coral Clips, and monitor natural multi-species spawning along Pulau Lang Tengah.
+              The <strong className="font-semibold text-[#123047]">Leo-Lions Club of KL Solaris</strong> partners with <strong className="font-semibold text-[#247BA0]">Coralku</strong> marine researchers to cultivate heat-resilient super-corals, deploy eco-friendly Coral Clips, and monitor natural multi-species spawning along Pulau Lang Tengah.
             </p>
 
             {/* CTAs */}
