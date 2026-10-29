@@ -57,7 +57,7 @@ function createDefaultSeed(): DatabaseSchema {
     slug: 'solaris-reef',
     description:
       'In scientific partnership with Coralku and local marine researchers, Leo-Lion Club of KL Solaris accelerates resilience-based reef restoration at Pulau Lang Tengah and Peninsular marine parks. Utilizing Coral Clips technology, deep-water nurseries, and Project ASSIST super-corals, we restore depleted reefs into self-sustaining, naturally spawning ecosystems.',
-    fundraisingTargetSen: 5000000, // RM 50,000.00
+    fundraisingTargetSen: 500000, // RM 50,000.00
     coralPlantingTarget: 250,
     verifiedCoralPlantingCount: 0,
     volunteerCount: 0,
