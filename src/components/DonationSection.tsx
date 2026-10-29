@@ -194,7 +194,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Submission failed');
-      setInquiryStatus('Inquiry sent. Dr Natasha Zulaikha from Coralku will reach out shortly.');
+      setInquiryStatus('Inquiry sent.');
       setTimeout(() => {
         setShowInquiryModal(false);
         setInquiryStatus(null);
@@ -431,7 +431,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
               {/* Referral Textbox */}
               <div className="mt-5 pt-5 border-t border-[#123047]/10">
                 <Field
-                  label="Referral code or club name"
+                  label="Club name"
                   hint="Optional. If a Leo/Lion member, diver, or friend referred you, please enter their club name "
                 >
                   <input
