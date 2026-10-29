@@ -8,7 +8,7 @@ interface FooterProps {
 
 const contactGroups = [
   {
-    name: 'Leo-Lion Club of Solaris KL',
+    name: 'Leo-Lions Club of Solaris KL',
     email: 'leolionscluboftenacitykl@gmail.com',
     phone: '+60-12 366 0188',
   },
