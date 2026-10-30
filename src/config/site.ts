@@ -138,7 +138,7 @@ export const siteConfig: SiteConfig = {
     keystoneSource: 'Source: 2024 Coral Bleaching Impact Report (Reef Check Malaysia & Coralku)',
 
     zeroOverheadDescription:
-      'Every ringgit directly funds physical nursery spider frames, coral collection, shoreline planting setups, dive boat fuel, and 12-month photogrammetric monitoring at Pantai Pasir Besar.',
+      'Every ringgit makes a tangible difference, directly supporting Coralku’s coral restoration initiatives, from building underwater nursery spider frames and collecting coral fragments to preparing shoreline planting sites and sustaining long-term marine conservation efforts.',
 
     directAllocationBadge: 'Directly allocated to support our cause.',
   },
