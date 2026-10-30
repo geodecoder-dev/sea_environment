@@ -1,11 +1,19 @@
+```typescript
 /**
  * Email Service for Solaris Reef Citizen Restoration Programme
- * Dispatches donation receipts, update notifications, and contact inquiries.
- * Integrates Resend API when RESEND_API_KEY is configured.
- * Email dispatch failures are logged cleanly without affecting payment confirmation state.
+ *
+ * Handles:
+ * - Donation receipt emails to donors.
+ * - Contact inquiry notifications to administrators.
+ *
+ * Integrates with Resend API.
+ *
+ * Email dispatch failures are logged cleanly without affecting
+ * payment confirmation state.
  */
 
 import { siteConfig } from '../src/config/site.js';
+
 import {
   ReceiptPayload,
   generateReceiptEmailHtml,
@@ -23,71 +31,236 @@ export interface ContactInquiryEmailData {
   message: string;
 }
 
+/**
+ * Supported environment variables.
+ *
+ * Cloudflare Workers:
+ * Pass env bindings into the email service methods.
+ *
+ * Node.js:
+ * Falls back to process.env.
+ */
+interface EmailEnvironment {
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
+  INQUIRY_EMAIL?: string;
+}
+
+interface EmailResult {
+  success: boolean;
+  messageId?: string;
+  simulated: boolean;
+  error?: string;
+}
+
+/**
+ * Retrieves environment variables.
+ */
+function getEnvironmentValue(
+  key: keyof EmailEnvironment,
+  env?: EmailEnvironment
+): string {
+  const envValue = env?.[key];
+
+  if (envValue) {
+    return envValue;
+  }
+
+  if (typeof process !== 'undefined' && process.env?.[key]) {
+    return process.env[key] || '';
+  }
+
+  return '';
+}
+
+/**
+ * Checks whether Resend is configured.
+ */
+function getResendApiKey(env?: EmailEnvironment): string {
+  const key = getEnvironmentValue('RESEND_API_KEY', env);
+
+  if (!key || key === 'your_resend_api_key_here') {
+    return '';
+  }
+
+  return key;
+}
+
+/**
+ * Sends an email using Resend.
+ */
+async function sendViaResend(
+  apiKey: string,
+  payload: Record<string, any>
+): Promise<{
+  success: boolean;
+  messageId?: string;
+  error?: string;
+}> {
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+
+      body: JSON.stringify(payload),
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      console.error(
+        `[EMAIL] Resend API error (${response.status}): ${responseText}`
+      );
+
+      return {
+        success: false,
+        error: `Resend API returned HTTP ${response.status}: ${responseText}`,
+      };
+    }
+
+    let result: { id?: string };
+
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      console.error('[EMAIL] Resend returned an invalid JSON response.');
+
+      return {
+        success: false,
+        error: 'Invalid response received from Resend.',
+      };
+    }
+
+    if (!result.id) {
+      console.error('[EMAIL] Resend response did not contain an email ID.');
+
+      return {
+        success: false,
+        error: 'Resend did not return an email ID.',
+      };
+    }
+
+    return {
+      success: true,
+      messageId: result.id,
+    };
+  } catch (err: unknown) {
+    const errorMessage =
+      err instanceof Error ? err.message : String(err);
+
+    console.error('[EMAIL] Network error:', errorMessage);
+
+    return {
+      success: false,
+      error: errorMessage,
+    };
+  }
+}
+
 export class EmailService {
+
   /**
-   * Dispatches an official donation receipt to the donor.
+   * Sends an official donation receipt to the donor.
+   *
+   * Recipient:
+   * data.donorEmail
+   *
+   * This method does not modify payment confirmation state.
    */
   public async sendDonationReceipt(
     data: ReceiptPayload,
-    env?: Record<string, any>
-  ): Promise<{ success: boolean; messageId?: string; simulated: boolean; error?: string }> {
-    const resendApiKey = env?.RESEND_API_KEY || (typeof process !== 'undefined' ? process.env?.RESEND_API_KEY : '');
-    const emailFrom = env?.EMAIL_FROM || (typeof process !== 'undefined' ? process.env?.EMAIL_FROM : '') || 'Solaris Reef Campaign <receipts@solaris-reef.org>';
+    env?: EmailEnvironment
+  ): Promise<EmailResult> {
+
+    const resendApiKey = getResendApiKey(env);
+
+    const emailFrom =
+      getEnvironmentValue('EMAIL_FROM', env) ||
+      'Solaris Reef Campaign <receipts@solaris-reef.org>';
 
     const html = generateReceiptEmailHtml(data);
 
-    if (resendApiKey && resendApiKey !== 'your_resend_api_key_here') {
-      try {
-        const response = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${resendApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: emailFrom,
-            to: [data.donorEmail],
-            subject: `Official Receipt #${data.internalReference} — Solaris Reef Coral Sponsorship (RM ${data.amountRm.toFixed(2)})`,
-            html,
-          }),
-        });
+    const subject =
+      `Official Receipt #${data.internalReference} — ` +
+      `Solaris Reef Coral Sponsorship (RM ${data.amountRm.toFixed(2)})`;
 
-        if (response.ok) {
-          const result = (await response.json()) as any;
-          console.info(`[EMAIL] Sent official receipt ${data.internalReference} via Resend (${result.id})`);
-          return { success: true, messageId: result.id, simulated: false };
-        } else {
-          const errText = await response.text();
-          console.warn(`[EMAIL] Resend API error (${response.status}): ${errText}`);
-          return { success: false, simulated: false, error: errText };
-        }
-      } catch (err: any) {
-        console.warn(`[EMAIL] Network error sending receipt via Resend:`, err.message);
-        return { success: false, simulated: false, error: err.message };
-      }
+    // Simulation mode when Resend credentials are unavailable.
+    if (!resendApiKey) {
+      console.info(
+        `[EMAIL SIMULATION] Donation receipt generated for ` +
+        `${data.donorEmail} | Reference: ${data.internalReference} | ` +
+        `Amount: RM ${data.amountRm.toFixed(2)}`
+      );
+
+      return {
+        success: true,
+        messageId: `sim_${Date.now()}`,
+        simulated: true,
+      };
     }
 
-    // Fallback simulation / audit mode (in dev/sandbox without Resend credentials)
+    const result = await sendViaResend(resendApiKey, {
+      from: emailFrom,
+      to: [data.donorEmail],
+      subject,
+      html,
+    });
+
+    if (!result.success) {
+      console.error(
+        `[EMAIL] Failed to send donation receipt ${data.internalReference}:`,
+        result.error
+      );
+
+      return {
+        success: false,
+        simulated: false,
+        error: result.error,
+      };
+    }
+
     console.info(
-      `[EMAIL SIMULATION] Official receipt ${data.internalReference} generated for ${data.donorEmail} (RM ${data.amountRm.toFixed(2)})`
+      `[EMAIL] Donation receipt ${data.internalReference} submitted to Resend. ` +
+      `Message ID: ${result.messageId}`
     );
+
     return {
       success: true,
-      messageId: `sim_${Date.now()}`,
-      simulated: true,
+      messageId: result.messageId,
+      simulated: false,
     };
   }
 
   /**
-   * Handles contact form inquiries.
+   * Sends contact inquiry notifications to the administrator.
+   *
+   * Recipient:
+   * INQUIRY_EMAIL environment variable, or
+   * siteConfig.contact.email as fallback.
+   *
+   * Reply-To:
+   * The original inquiry sender.
    */
   public async sendContactInquiry(
     inquiry: ContactInquiryEmailData,
-    env?: Record<string, any>
-  ): Promise<{ success: boolean; simulated: boolean }> {
-    const resendApiKey = env?.RESEND_API_KEY || (typeof process !== 'undefined' ? process.env?.RESEND_API_KEY : '');
-    const targetEmail = siteConfig.contact.email;
+    env?: EmailEnvironment
+  ): Promise<EmailResult> {
 
+    const resendApiKey = getResendApiKey(env);
+
+    const targetEmail =
+      getEnvironmentValue('INQUIRY_EMAIL', env) ||
+      siteConfig.contact.email;
+
+    const emailFrom =
+      getEnvironmentValue('EMAIL_FROM', env) ||
+      'Solaris Reef Campaign <inquiries@solaris-reef.org>';
+
+    // Escape all user-submitted content before inserting into HTML.
     const safeName = escapeHtml(inquiry.name);
     const safeEmail = escapeHtml(inquiry.email);
     const safePhone = escapeHtml(inquiry.phone || 'Not provided');
@@ -95,41 +268,91 @@ export class EmailService {
     const safeMsg = escapeHtml(inquiry.message).replace(/\n/g, '<br>');
 
     const html = `
-      <h3>New Solaris Reef Inquiry</h3>
-      <p><strong>Name:</strong> ${safeName}</p>
-      <p><strong>Email:</strong> ${safeEmail}</p>
-      <p><strong>Phone:</strong> ${safePhone}</p>
-      <p><strong>Organisation:</strong> ${safeOrg}</p>
-      <hr>
-      <p><strong>Message:</strong></p>
-      <div>${safeMsg}</div>
+      <!DOCTYPE html>
+      <html>
+        <body>
+          <h2>New Solaris Reef Inquiry</h2>
+
+          <p>
+            <strong>Name:</strong> ${safeName}
+          </p>
+
+          <p>
+            <strong>Email:</strong> ${safeEmail}
+          </p>
+
+          <p>
+            <strong>Phone:</strong> ${safePhone}
+          </p>
+
+          <p>
+            <strong>Organisation:</strong> ${safeOrg}
+          </p>
+
+          <hr>
+
+          <p><strong>Message:</strong></p>
+
+          <div>${safeMsg}</div>
+
+        </body>
+      </html>
     `;
 
-    if (resendApiKey && resendApiKey !== 'your_resend_api_key_here') {
-      try {
-        await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${resendApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: 'Solaris Reef Inquiries <inquiries@solaris-reef.org>',
-            to: [targetEmail],
-            reply_to: inquiry.email,
-            subject: `Solaris Reef Contact: ${safeName} (${safeOrg})`,
-            html,
-          }),
-        });
-        return { success: true, simulated: false };
-      } catch (err) {
-        console.warn('[EMAIL] Failed to send contact inquiry via Resend:', err);
-      }
+    const subject =
+      `Solaris Reef Contact: ${inquiry.name} (${inquiry.organisation || 'Individual'})`;
+
+    // Simulation mode when Resend credentials are unavailable.
+    if (!resendApiKey) {
+      console.info(
+        `[EMAIL SIMULATION] Contact inquiry received from ` +
+        `${inquiry.name} <${inquiry.email}>. ` +
+        `Admin recipient: ${targetEmail}`
+      );
+
+      return {
+        success: true,
+        messageId: `sim_${Date.now()}`,
+        simulated: true,
+      };
     }
 
-    console.info(`[EMAIL SIMULATION] Inquiry received from ${inquiry.name} <${inquiry.email}>`);
-    return { success: true, simulated: true };
+    const result = await sendViaResend(resendApiKey, {
+      from: emailFrom,
+      to: [targetEmail],
+      reply_to: inquiry.email,
+      subject,
+      html,
+    });
+
+    if (!result.success) {
+      console.error(
+        '[EMAIL] Failed to deliver contact inquiry:',
+        result.error
+      );
+
+      return {
+        success: false,
+        simulated: false,
+        error: result.error,
+      };
+    }
+
+    console.info(
+      `[EMAIL] Contact inquiry submitted to Resend. ` +
+      `Admin: ${targetEmail} | Message ID: ${result.messageId}`
+    );
+
+    return {
+      success: true,
+      messageId: result.messageId,
+      simulated: false,
+    };
   }
 }
 
+/**
+ * Shared email service instance.
+ */
 export const emailService = new EmailService();
+```
