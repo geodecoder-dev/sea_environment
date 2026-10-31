@@ -25,32 +25,48 @@ import { sanitizeCsvField, checkRateLimit, getSecurityHeaders } from './middlewa
 import { loadConfig } from './config/index.js';
 
 export interface ApiContext {
-  env?: Record<string, any> & {
-    DB?: D1DatabaseBinding;
-    BUCKET?: {
-      put: (key: string, value: any, options?: any) => Promise<any>;
-      get: (key: string) => Promise<{
-        body: ReadableStream | null;
-        arrayBuffer: () => Promise<ArrayBuffer>;
-        httpMetadata?: { contentType?: string };
-      } | null>;
-      delete: (key: string) => Promise<void>;
+  env?: Record<string, any> &
+    EmailEnvironment & {
+      DB?: D1DatabaseBinding;
+
+      BUCKET?: {
+        put: (
+          key: string,
+          value: any,
+          options?: any
+        ) => Promise<any>;
+
+        get: (key: string) => Promise<{
+          body: ReadableStream | null;
+          arrayBuffer: () => Promise<ArrayBuffer>;
+          httpMetadata?: {
+            contentType?: string;
+          };
+        } | null>;
+
+        delete: (key: string) => Promise<void>;
+      };
+
+      BILLPLZ_API_KEY?: string;
+      BILLPLZ_COLLECTION_ID?: string;
+      BILLPLZ_X_SIGNATURE_KEY?: string;
+      BILLPLZ_SANDBOX?: string;
+
+      ADMIN_EMAIL?: string;
+      ADMIN_PASSWORD?: string;
+      ADMIN_PASSWORD_HASH?: string;
+      ADMIN_SALT?: string;
+
+      SESSION_SECRET?: string;
+      ENABLE_PAYMENT_SIMULATION?: string;
+
+      CANONICAL_APP_URL?: string;
+      APP_URL?: string;
+      ALLOWED_ORIGINS?: string;
+
+      NODE_ENV?: string;
     };
-    BILLPLZ_API_KEY?: string;
-    BILLPLZ_COLLECTION_ID?: string;
-    BILLPLZ_X_SIGNATURE_KEY?: string;
-    BILLPLZ_SANDBOX?: string;
-    ADMIN_EMAIL?: string;
-    ADMIN_PASSWORD?: string;
-    ADMIN_PASSWORD_HASH?: string;
-    ADMIN_SALT?: string;
-    SESSION_SECRET?: string;
-    ENABLE_PAYMENT_SIMULATION?: string;
-    CANONICAL_APP_URL?: string;
-    APP_URL?: string;
-    ALLOWED_ORIGINS?: string;
-    NODE_ENV?: string;
-  };
+
   waitUntil?: (promise: Promise<any>) => void;
 }
 
