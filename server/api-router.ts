@@ -6,7 +6,11 @@
 
 import { db, D1DatabaseBinding, DatabaseError } from './db.js';
 import { billplz } from './billplz.js';
-import { emailService } from './email.js';
+import {
+  emailService,
+  type EmailEnvironment,
+} from './email.js';
+
 import {
   hashPassword,
   verifyPassword,
