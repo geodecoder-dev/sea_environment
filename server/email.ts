@@ -155,9 +155,9 @@ async function sendViaResend(
         method: 'POST',
 
         headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
+        Authorization: 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
 
         body: JSON.stringify(payload),
       }
