@@ -93,7 +93,7 @@ async function dispatchReceiptIdempotently(
     });
     // Record receipt dispatched in DB
     await db.markReceiptSent(latest.internalReference, d1);
-    await emailService.sendDonationReceipt(receiptPayload, env);
+    await emailService.sendDonationThankYou(receiptPayload, env);
     return true;
   } catch (emailErr) {
     console.warn('[RECEIPT DISPATCH] Non-blocking receipt dispatch warning:', emailErr);
@@ -667,7 +667,7 @@ export async function handleUniversalApiRequest(
               paymentStatus: 'paid',
               paidAt: paidAtTime,
             });
-            await emailService.sendDonationReceipt(receiptPayload, context.env);
+            await emailService.sendDonationThankYou(receiptPayload, context.env);
             await db.markReceiptSent(donation.internalReference, d1);
           } catch (emailErr) {
             console.warn('[SIMULATOR] Receipt dispatch warning:', emailErr);
@@ -724,7 +724,7 @@ export async function handleUniversalApiRequest(
       }
 
       const receiptPayload = buildReceiptPayload(donation);
-      const result = await emailService.sendDonationReceipt(receiptPayload, context.env);
+      const result = await emailService.sendDonationThankYou(receiptPayload, context.env);
       await db.markReceiptSent(donation.internalReference, d1);
 
       // Safe response: does NOT disclose raw email
