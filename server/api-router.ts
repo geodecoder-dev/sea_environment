@@ -92,9 +92,23 @@ async function dispatchReceiptIdempotently(
       paidAt: latest.paidAt || new Date().toISOString(),
     });
     // Record receipt dispatched in DB
-    await db.markReceiptSent(latest.internalReference, d1);
-    await emailService.sendDonationThankYou(receiptPayload, env);
-    return true;
+  const emailResult = await emailService.sendDonationThankYou(
+  receiptPayload,
+  env
+);
+
+if (!emailResult.success || emailResult.simulated) {
+  console.warn(
+    '[RECEIPT DISPATCH] Email was not actually delivered:',
+    emailResult.error || 'Email service is running in simulation mode.'
+  );
+
+  return false;
+}
+
+await db.markReceiptSent(latest.internalReference, d1);
+
+return true;
   } catch (emailErr) {
     console.warn('[RECEIPT DISPATCH] Non-blocking receipt dispatch warning:', emailErr);
     return false;
