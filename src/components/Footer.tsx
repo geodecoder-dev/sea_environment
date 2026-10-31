@@ -16,7 +16,7 @@ const contactGroups = [
     name: 'CoralKu',
     address: 'Malaysia Lang Tengah Island, Pulau Lang Tengah, 21090 Kuala Terengganu, Terengganu',
     email: 'natasha@coralku.org',
-    website: '@coralkuconservation',
+    website: 'Coralku',
   },
 ];
 
