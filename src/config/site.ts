@@ -89,7 +89,7 @@ export const siteConfig: SiteConfig = {
   contact: {
     email: 'bernicetcy@gmail.com',
     phone: '(+60) 12-3660188',
-    website: 'https://www.coralku.org',
+    website: 'https://www.instagram.com/coralkuconservation/',
     address: 'Pantai Pasir Besar, Pulau Lang Tengah, Terengganu, Malaysia',
   },
   partners: {
