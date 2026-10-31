@@ -662,7 +662,7 @@ export const DonationSection: React.FC<DonationSectionProps> = ({
                 className="w-full py-3 bg-[#123047] hover:bg-[#247BA0] active:scale-[0.99] text-white text-sm font-semibold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 <Send className="w-4 h-4" />
-                <span>{inquiryLoading ? 'Sending...' : 'Send inquiry to Coralku'}</span>
+                <span>{inquiryLoading ? 'Sending...' : 'Send inquiry to Us!'}</span>
               </button>
             </form>
           </div>
