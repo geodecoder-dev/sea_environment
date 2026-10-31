@@ -44,7 +44,7 @@ export interface ContactInquiryEmailData {
   message: string;
 }
 
-interface EmailEnvironment {
+export interface EmailEnvironment {
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
   INQUIRY_EMAIL?: string;
