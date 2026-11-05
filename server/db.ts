@@ -1,167 +1,96 @@
-    d1?: D1DatabaseBinding
-  ) {
-    const id = `act-${generateRandomHex(4)}`;
-    const timestamp = new Date().toISOString();
-    const entry: AdminActivity = {
-      ...activity,
-      id,
-      timestamp,
-    };
+/**
+ * Database Layer for Solaris Reef Campaign Hub
+ * Supports Cloudflare D1 (Edge SQL) with strict durable persistence semantics:
+ * - When D1 is present, errors are thrown (NEVER swallowed into memory fallback).
+ * - In-memory adapter is preserved strictly for local development and unit tests.
+ * - Enforces atomic conditional state transitions (e.g. pending -> paid).
+ */
 
-    if (d1) {
-      try {
-        await d1
-          .prepare(
-            `INSERT INTO admin_activities (id, admin_id, admin_name, action, entity_type, entity_reference, details, timestamp)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(
-            id,
-            entry.adminId,
-            entry.adminName,
-            entry.action,
-            entry.entityType,
-            entry.entityReference || null,
-            entry.details,
-            timestamp
-          )
-          .run();
-      } catch (err) {
-        console.error('[DB] D1 logActivity error:', err);
-      }
-    }
+import type {
+  Campaign,
+  Donation,
+  CampaignUpdate,
+  AdminUser,
+  AdminActivity,
+  WebhookLog,
+  DatabaseSchema,
+  PaymentStatus,
+  AttributionPreference,
+} from './types.js';
+import { generateSecureToken } from './auth.js';
+import { calculateEntitlementsFromSen } from './services/pricing.js';
 
-    this.memData.activities.unshift(entry);
-    if (this.memData.activities.length > 200) {
-      this.memData.activities = this.memData.activities.slice(0, 200);
-    }
-  }
-
-  public async getActivities(limit: number = 50, d1?: D1DatabaseBinding): Promise<AdminActivity[]> {
-    if (d1) {
-      try {
-        const res = await d1
-          .prepare('SELECT * FROM admin_activities ORDER BY timestamp DESC LIMIT ?')
-          .bind(limit)
-          .all<any>();
-
-        if (res?.results && Array.isArray(res.results)) {
-          return res.results.map((r) => ({
-            id: r.id,
-            adminId: r.admin_id,
-            adminName: r.admin_name,
-            action: r.action,
-            entityType: r.entity_type,
-            entityReference: r.entity_reference,
-            details: r.details,
-            timestamp: r.timestamp,
-          }));
-        }
-      } catch (err) {
-        console.error('[DB] D1 getActivities error:', err);
-        throw new DatabaseError('Failed to fetch admin activities', err);
-      }
-    }
-
-    return this.memData.activities.slice(0, limit);
-  }
-
-  public async logWebhook(
-    entry: Omit<WebhookLog, 'id' | 'timestamp'>,
-    d1?: D1DatabaseBinding
-  ) {
-    const id = `whk-${generateRandomHex(4)}`;
-    const timestamp = new Date().toISOString();
-    const log: WebhookLog = {
-      ...entry,
-      id,
-      timestamp,
-    };
-
-    if (d1) {
-      try {
-        await d1
-          .prepare(
-            `INSERT INTO webhook_logs (id, bill_id, internal_ref, status, signature_verified, payload_summary, timestamp)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`
-          )
-          .bind(
-            id,
-            log.billId,
-            log.internalRef,
-            log.status,
-            log.signatureVerified ? 1 : 0,
-            log.payloadSummary,
-            timestamp
-          )
-          .run();
-      } catch (err) {
-        console.error('[DB] D1 logWebhook error:', err);
-      }
-    }
-
-    this.memData.webhookLogs.unshift(log);
-    if (this.memData.webhookLogs.length > 100) {
-      this.memData.webhookLogs = this.memData.webhookLogs.slice(0, 100);
-    }
-  }
-
-  public async getWebhookLogs(limit: number = 20, d1?: D1DatabaseBinding): Promise<WebhookLog[]> {
-    if (d1) {
-      try {
-        const res = await d1
-          .prepare('SELECT * FROM webhook_logs ORDER BY timestamp DESC LIMIT ?')
-          .bind(limit)
-          .all<any>();
-
-        if (res?.results && Array.isArray(res.results)) {
-          return res.results.map((r) => ({
-            id: r.id,
-            billId: r.bill_id,
-            internalRef: r.internal_ref,
-            status: r.status,
-            signatureVerified: Boolean(r.signature_verified),
-            payloadSummary: r.payload_summary,
-            timestamp: r.timestamp,
-          }));
-        }
-      } catch (err) {
-        console.error('[DB] D1 getWebhookLogs error:', err);
-        throw new DatabaseError('Failed to fetch webhook logs', err);
-      }
-    }
-
-    return this.memData.webhookLogs.slice(0, limit);
-  }
-
-  private mapDonationRow(row: any): Donation {
-    return {
-      id: row.id,
-      internalReference: row.internal_reference,
-      verificationToken: row.verification_token || '',
-      campaignId: row.campaign_id,
-      donorName: row.donor_name,
-      donorEmail: row.donor_email,
-      amountSen: Number(row.amount_sen),
-      currency: row.currency,
-      attributionPreference: row.attribution_preference,
-      message: row.message || '',
-      referral: row.referral || '',
-      coralName: row.coral_name || undefined,
-      isGift: Boolean(row.is_gift),
-      recipientName: row.recipient_name || undefined,
-      recipientEmail: row.recipient_email || undefined,
-      billplzBillId: row.billplz_bill_id,
-      billplzUrl: row.billplz_url,
-      paymentStatus: row.payment_status,
-      paidAt: row.paid_at,
-      callbackReceivedAt: row.callback_received_at,
-      receiptSentAt: row.receipt_sent_at,
-      receiptCount: Number(row.receipt_count || 0),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+export class DatabaseError extends Error {
+  constructor(message: string, public cause?: unknown) {
+    super(`[DatabaseError] ${message}`);
+    this.name = 'DatabaseError';
   }
 }
 
-export const db = new Database();
+export type D1PreparedStatement = {
+  bind: (...params: any[]) => D1PreparedStatement;
+  first: <T = any>(colName?: string) => Promise<T | null>;
+  all: <T = any>() => Promise<{ results?: T[]; success: boolean }>;
+  run: () => Promise<{ success: boolean }>;
+};
+
+export type D1DatabaseBinding = {
+  prepare: (query: string) => D1PreparedStatement;
+  batch?: (statements: any[]) => Promise<any[]>;
+};
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function generateRandomHex(length = 4): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
+
+function createDefaultSeed(): DatabaseSchema {
+  const initialCampaign: Campaign = {
+    id: 'solaris-reef-2026',
+    title: 'Solaris Reef: Coralku Community Restoration Initiative',
+    slug: 'solaris-reef',
+    description:
+      'In scientific partnership with Coralku and local marine researchers, Leo-Lion Club of KL Solaris accelerates resilience-based reef restoration at Pulau Lang Tengah and Peninsular marine parks. Utilizing Coral Clips technology, deep-water nurseries, and Project ASSIST super-corals, we restore depleted reefs into self-sustaining, naturally spawning ecosystems.',
+    fundraisingTargetSen: 5000000, // RM 50,000.00 (matches the production schema seed)
+    coralPlantingTarget: 250,
+    verifiedCoralPlantingCount: 0,
+    volunteerCount: 0,
+    campaignStatus: 'active',
+    location: 'Pulau Lang Tengah & Terengganu Marine Sanctuary, Malaysia',
+    milestones: [],
+    createdAt: '2026-08-01T08:00:00.000Z',
+    updatedAt: '2026-10-19T08:30:00.000Z',
+  };
+
+  return {
+    campaign: initialCampaign,
+    updates: [],
+    donations: [],
+    admins: [],
+    activities: [],
+    webhookLogs: [],
+  };
+}
+
+export class Database {
+  private memData: DatabaseSchema;
+
+  constructor() {
+    this.memData = createDefaultSeed();
+  }
+
+  // Helper for test resets
+  public resetMemoryData(): void {
+    this.memData = createDefaultSeed();
+  }
+
+  // ---------------------------------------------------------------------------
+  // CAMPAIGN METHODS
+  // ---------------------------------------------------------------------------
