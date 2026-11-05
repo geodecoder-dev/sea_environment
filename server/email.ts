@@ -280,7 +280,7 @@ export class EmailService {
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Thank You for Supporting Solaris Reef</title>
+          <title>Thank You for Supporting Us!</title>
         </head>
 
         <body style="
@@ -310,7 +310,7 @@ export class EmailService {
                 margin: 0;
                 font-size: 26px;
               ">
-                Thank You for Supporting Solaris Reef!
+                Thank You for Supporting Us!
               </h1>
 
               <p style="
@@ -332,7 +332,7 @@ export class EmailService {
 
               <p>
                 Thank you for contributing to the
-                <strong>Solaris Reef Citizen Restoration Programme</strong>.
+                <strong>Solaris Adopt a Coral Program!</strong>.
               </p>
 
               <p>
@@ -425,7 +425,7 @@ export class EmailService {
             ">
 
               <p>
-                Solaris Reef Citizen Restoration Programme
+                Solaris Adopt a Coral Program
               </p>
 
               <p>
@@ -466,7 +466,7 @@ export class EmailService {
         to: [data.donorEmail],
 
         subject:
-          'Thank You for Supporting Solaris Reef Coral Restoration!',
+          'Thank You for Supporting Us!',
 
         html,
       }
