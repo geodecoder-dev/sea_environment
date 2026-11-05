@@ -94,3 +94,32 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
         <p className="text-xs text-[#123047]/60 mt-1">Loading live marine conservation data</p>
       </div>
     );
+  }
+
+  if (error || !campaign) {
+    return (
+      <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center bg-[#FFFDF7]">
+        <p className="font-serif text-xl font-bold text-red-600 mb-2">Unable to Load Campaign</p>
+        <p className="text-xs text-[#123047]/70 mb-4">{error || 'Campaign data is unavailable.'}</p>
+        <button
+          onClick={() => {
+            setLoading(true);
+            void fetchCampaignData(undefined, true);
+          }}
+          className="px-5 py-2.5 bg-[#123047] text-white text-xs font-semibold rounded-xl hover:bg-[#247BA0] transition-colors"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-[#FFFDF7]">
+      <HeroCollage campaign={campaign} onDonateClick={scrollToDonate} onImpactClick={scrollToImpact} />
+      <CampaignOverview verifiedCoralPlantingCount={campaign.verifiedCoralPlantingCount} />
+      <CampaignProgress campaign={campaign} />
+      <DonationSection recentDonations={recentDonations} onSuccessfulInitiation={handleCheckoutInitiated} />
+    </div>
+  );
+};
