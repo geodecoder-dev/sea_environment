@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS donations (
 CREATE INDEX IF NOT EXISTS idx_donations_ref ON donations(internal_reference);
 CREATE INDEX IF NOT EXISTS idx_donations_token ON donations(verification_token);
 CREATE INDEX IF NOT EXISTS idx_donations_status ON donations(payment_status);
+CREATE INDEX IF NOT EXISTS idx_donations_campaign_status ON donations(campaign_id, payment_status);
 CREATE INDEX IF NOT EXISTS idx_donations_bill_id ON donations(billplz_bill_id);
 CREATE INDEX IF NOT EXISTS idx_donations_created ON donations(created_at DESC);
 
@@ -93,42 +94,3 @@ CREATE TABLE IF NOT EXISTS admin_activities (
   admin_id TEXT NOT NULL,
   admin_name TEXT NOT NULL,
   action TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
-  entity_reference TEXT,
-  details TEXT NOT NULL,
-  timestamp TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_admin_activities_time ON admin_activities(timestamp DESC);
-
--- 6. Webhook Logs
-CREATE TABLE IF NOT EXISTS webhook_logs (
-  id TEXT PRIMARY KEY,
-  bill_id TEXT NOT NULL,
-  internal_ref TEXT NOT NULL,
-  status TEXT NOT NULL,
-  signature_verified INTEGER NOT NULL,
-  payload_summary TEXT NOT NULL,
-  timestamp TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_webhook_logs_time ON webhook_logs(timestamp DESC);
-
--- =============================================================================
--- SEED DATA (Campaign & Editorial Updates)
--- =============================================================================
-
-INSERT OR IGNORE INTO campaigns (
-  id, title, slug, description,
-  fundraising_target_sen, coral_planting_target, verified_coral_planting_count,
-  volunteer_count, campaign_status, location, milestones_json, created_at, updated_at
-) VALUES (
-  'solaris-reef-2026',
-  'Solaris Reef: Coralku Community Restoration Initiative',
-  'solaris-reef',
-  'In scientific partnership with Coralku and local marine researchers, Leo-Lion Club of KL Solaris accelerates resilience-based reef restoration at Pulau Lang Tengah and Peninsular marine parks. Utilizing Coral Clips technology, deep-water nurseries, and Project ASSIST super-corals, we restore depleted reefs into self-sustaining, naturally spawning ecosystems.',
-  5000000, 250, 0, 0, 'active',
-  'Pulau Lang Tengah & Terengganu Marine Sanctuary, Malaysia',
-  '[]',
-  '2026-08-01T08:00:00.000Z', '2026-10-19T08:30:00.000Z'
-);
