@@ -21,6 +21,20 @@ export interface Campaign {
   updatedAt: string;
 }
 
+/**
+ * Campaign data returned by the database layer with derived fundraising
+ * progress. These values are calculated from existing paid donation records;
+ * they are not persisted campaign columns.
+ */
+export interface CampaignSummary extends Campaign {
+  totalRaisedSen: number;
+  totalRaisedRm: number;
+  fundraisingTargetRm: number;
+  successfulDonationsCount: number;
+  fundedCoralFragmentCount: number;
+  percentAchieved: number;
+}
+
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'cancelled';
 export type AttributionPreference = 'public' | 'anonymous';
 
