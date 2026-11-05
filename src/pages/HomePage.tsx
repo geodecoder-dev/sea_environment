@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { HeroCollage } from '../components/HeroCollage';
 import { CampaignOverview } from '../components/CampaignOverview';
 import { CampaignProgress } from '../components/CampaignProgress';
@@ -9,47 +9,76 @@ interface HomePageProps {
   onNavigate: (path: string) => void;
 }
 
+const CAMPAIGN_REFRESH_INTERVAL_MS = 30_000;
+
 export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
   const [campaign, setCampaign] = useState<CampaignData | null>(null);
   const [recentDonations, setRecentDonations] = useState<RecentPublicDonation[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchInitialData();
-  }, []);
-
-  const fetchInitialData = async () => {
+  const fetchCampaignData = useCallback(async (signal?: AbortSignal, initialLoad = false) => {
     try {
-      const campRes = await fetch('/api/campaign');
+      const response = await fetch('/api/campaign', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        signal,
+      });
 
-      if (!campRes.ok) {
-        throw new Error('Failed to load campaign data');
+      if (!response.ok) {
+        throw new Error(`Failed to load campaign data (HTTP ${response.status})`);
       }
 
-      const campData = await campRes.json();
+      const payload = await response.json();
+      if (!payload?.campaign) {
+        throw new Error('Campaign data is missing from the server response');
+      }
 
-      setCampaign(campData.campaign);
-      setRecentDonations(campData.recentDonations || []);
-    } catch (err: any) {
-      setError(err.message || 'Unable to connect to Solaris Reef server');
+      setCampaign(payload.campaign as CampaignData);
+      setRecentDonations(Array.isArray(payload.recentDonations) ? payload.recentDonations : []);
+      setError(null);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      const message = err instanceof Error ? err.message : 'Unable to connect to Solaris Reef server';
+      // Keep the last successfully loaded campaign visible if a background refresh fails.
+      if (initialLoad) setError(message);
     } finally {
-      setLoading(false);
+      if (initialLoad) setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchCampaignData(controller.signal, true);
+
+    const refresh = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchCampaignData(undefined, false);
+      }
+    };
+
+    const intervalId = window.setInterval(refresh, CAMPAIGN_REFRESH_INTERVAL_MS);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [fetchCampaignData]);
 
   const scrollToDonate = () => {
-    const el = document.getElementById('donate');
-    el?.scrollIntoView({ behavior: 'smooth' });
+    document.getElementById('donate')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const scrollToImpact = () => {
-    const el = document.getElementById('impact');
-    el?.scrollIntoView({ behavior: 'smooth' });
+    document.getElementById('impact')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const handleCheckoutInitiated = (checkoutUrl: string) => {
-    // If internal simulated checkout or external Billplz url:
     if (checkoutUrl.startsWith('/')) {
       onNavigate(checkoutUrl);
     } else {
@@ -61,51 +90,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
     return (
       <div className="min-h-[80vh] flex flex-col items-center justify-center p-6 bg-[#FFFDF7]">
         <div className="w-12 h-12 rounded-full border-3 border-[#247BA0]/20 border-t-[#247BA0] animate-spin mb-4" />
-        <p className="font-serif text-lg font-bold text-[#123047]">
-          Connecting to Solaris Reef...
-        </p>
-        <p className="text-xs text-[#123047]/60 mt-1">
-          Loading live marine conservation data
-        </p>
+        <p className="font-serif text-lg font-bold text-[#123047]">Connecting to Solaris Reef...</p>
+        <p className="text-xs text-[#123047]/60 mt-1">Loading live marine conservation data</p>
       </div>
     );
-  }
-
-  if (error || !campaign) {
-    return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center bg-[#FFFDF7]">
-        <p className="font-serif text-xl font-bold text-red-600 mb-2">Unable to Load Campaign</p>
-        <p className="text-xs text-[#123047]/70 mb-4">{error}</p>
-        <button
-          onClick={fetchInitialData}
-          className="px-5 py-2.5 bg-[#123047] text-white text-xs font-semibold rounded-xl hover:bg-[#247BA0] transition-colors"
-        >
-          Try Again
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-[#FFFDF7]">
-      {/* Editorial Collage Hero Section */}
-      <HeroCollage
-        campaign={campaign}
-        onDonateClick={scrollToDonate}
-        onImpactClick={scrollToImpact}
-      />
-
-      {/* Campaign Overview & Ecological Mission */}
-      <CampaignOverview verifiedCoralPlantingCount={campaign.verifiedCoralPlantingCount} />
-
-      {/* Live Campaign Progress Dashboard & Milestones */}
-      <CampaignProgress campaign={campaign} />
-
-      {/* Interactive Donation Section (Billplz Integration) */}
-      <DonationSection
-        recentDonations={recentDonations}
-        onSuccessfulInitiation={handleCheckoutInitiated}
-      />
-    </div>
-  );
-};
