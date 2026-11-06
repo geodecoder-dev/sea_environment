@@ -20,7 +20,7 @@ export interface CampaignData {
   successfulDonationsCount: number;
   coralPlantingTarget: number;
   /** Total fragments funded by verified paid donations, calculated from pricing entitlements. */
-  fundedCoralFragmentCount?: number;
+  fundedCoralFragmentCount: number;
   /** Number of fragments physically planted and verified by the campaign team. */
   verifiedCoralPlantingCount: number;
   /** Volunteer/diver count maintained by authorised campaign administrators. */
