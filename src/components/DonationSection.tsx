@@ -16,8 +16,8 @@ const MIN_RM = MIN_DONATION_RM;
 
 const PRESETS = [
   { rm: 50, title: '1 Fragment', note: 'Survival monitoring.' },
-  { rm: 100, title: '1 Fragment + Updates', note: 'Monthly photo updates for 12 months.' },
-  { rm: 500, title: 'Spider-frame', note: '25 fragments plus monthly photo updates for 12 months.' },
+  { rm: 100, title: '1 Fragment + Updates', note: 'Adopt a coral including an update after 12 months!' },
+  { rm: 500, title: 'Spider-frame', note: '25 fragments plus an update after 12 months!' },
 ];
 
 const EMAIL_OK = (v: string) => /^\S+@\S+\.\S+$/.test(v.trim());
